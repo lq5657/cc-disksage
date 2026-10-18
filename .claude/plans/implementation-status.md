@@ -17,27 +17,31 @@
 | LLM | OpenAI 兼容、Ollama `/v1`、Credential Manager、payload 预览/同意、逐项分析、追问、严格 schema/证据 ID/数字校验、脱敏 |
 | 管理员清理 | `disksage-helper.exe`（scan/clean 固定任务、nonce/expiry、提权检查、规则重扫、路径/红线校验）；Windows Temp、机器 WER、Minidump、传递优化、Windows Update 缓存、DISM Analyze/StartComponentCleanup、休眠文件 |
 | 系统引导/回收站 | Windows.old → cleanmgr；还原点 → 系统保护；分页文件 → 系统属性；回收站 → 系统 API 清空 |
+| 自动清理 | `--auto-clean` 无窗口模式、安全默认可重建非管理员规则过滤、低空间阈值、Task Scheduler 注册/删除、设置页、独立 JSONL 日志、卸载钩子删除任务 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（46 项，2 个 ignored）
+- `cargo test --workspace`：通过（49 项，4 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
 - 真机 C 盘扫描：711,465 文件 / 198,923 目录 / 131.07 GB / 63.2 秒 / 102 个权限错误
 - 快速扫描真机结果（含管理员/维护项，13 项，约 31 秒热缓存）：npm 971MB、Chrome 758MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 24MB、VS Code 12.5MB、Edge 6.7MB、着色器 3.2MB、Windows Update 缓存 838MB（管理员）、Cargo 379MB（谨慎）；回收站/分页文件/还原点引导项已出现（默认不勾选）
+- 自动清理只读候选核验（`reports_auto_candidate_rules_read_only`）：仅 9 条安全规则，npm 971MB、Chrome 757MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 25MB、VS Code 13MB、Edge 7MB、着色器 3.35MB；管理员/谨慎/引导/回收站项均被排除
 - 回收站删除 API：真机通过
 - Windows Credential Manager roundtrip：真机通过
 - helper 非管理员环境拒绝执行并写出结果：真机通过
-- NSIS 安装/启动/卸载：真机通过；安装目录包含 `disksage-helper.exe`
+- 计划任务非管理员创建/查询/删除：真机通过（Rust `schtasks.exe` 参数，含空格路径 XML 校验；ignored 集成测试）
+- 无窗口 `--auto-clean`：未启用退出码 1；系统盘剩余空间高于测试阈值时正确跳过，未触发删除
+- NSIS 安装/启动/卸载：真机通过；安装目录包含 `disksage-helper.exe`；卸载后 `CC DiskSage Auto Clean` 计划任务被移除
 
 ## 未完成（下一阶段）
 
 1. NTFS MFT 秒扫（`mft`/`ntfs` crate），与 walker 基准对比。
 2. 重复文件查找（大小分组 + 部分/完整哈希 + 硬链接去重）。
-3. 定时/低空间自动清理（Task Scheduler）与托盘通知。
+3. 自动清理的真实到点运行与托盘通知（需在 VM 或用户确认后验证，可能删除真实缓存）。
 4. SQLite 快照持久化（当前快照在进程内存，重启丢失）。
 5. 代码签名、自动更新、per-machine 安装变体、便携版。
 6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
@@ -46,6 +50,8 @@
 
 - 全盘扫描无管理员权限时无法读取部分系统目录（显示错误计数）；管理员扫描 helper 未接入。
 - treemap 使用逻辑大小；硬链接/稀疏文件的分配大小精确统计属于后续优化。
+- 自动清理只在计划任务触发时检查低空间阈值，不是常驻监控；任务仅在用户登录时运行。
+- 自动清理默认进入回收站；开启永久删除后才会立即释放空间。计划任务被外部移除时，需要在设置页重新保存。
 - 产品公开名 `DiskSage` 已被其他项目使用，发布前需改名/确认。
 - 安装包未签名，SmartScreen 可能提示。
 - Lite 安装包要求目标机已有 WebView2；缺失时 bootstrapper 会尝试联网。

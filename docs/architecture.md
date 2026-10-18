@@ -32,6 +32,12 @@ src-tauri（Tauri 命令 / AppState）
    `wuauserv/bits/dosvc`。结果写回 `<job>.result.json`，主进程合并并展示。
 8. **LLM**：`llm_preview_payload` 返回脱敏 payload；用户确认后
    `llm_assess_finding` 调用 provider，校验 evidence ID、数字与 schema；失败回退。
+9. **自动清理**：设置页通过 `schtasks.exe` 注册当前用户任务
+   `CC DiskSage Auto Clean`，运行 `<exe> --auto-clean`。进程在创建 Tauri 窗口前进入
+   `auto_clean` 模块：检查系统盘剩余空间阈值 → 加载内置规则 → 只读快速扫描 → 只选择
+   `safe + default_selected + regenerable + 非管理员` 的文件项 → 走同一套
+   `create_plan/execute_plan` 校验与审计。默认回收站，可选永久删除；日志写入
+   `auto-clean.jsonl`。卸载钩子删除计划任务。
 
 ## 安全边界
 
@@ -46,9 +52,10 @@ src-tauri（Tauri 命令 / AppState）
 `get_volumes`、`scan_volume`、`get_treemap`、`quick_scan`、`get_finding`、
 `create_plan`、`execute_plan`、`get_audit_history`、`llm_get_config`、
 `llm_set_config`、`llm_set_key`、`llm_clear_key`、`llm_test_connection`、
-`llm_preview_payload`、`llm_assess_finding`、`llm_ask_followup`。
+`llm_preview_payload`、`llm_assess_finding`、`llm_ask_followup`、
+`get_auto_clean_status`、`set_auto_clean_config`、`run_auto_clean_now`。
 
 ## 后续
 
-MFT 快扫、重复文件、定时清理、SQLite 快照持久化、Windows.old/还原点引导、
-代码签名与自动更新。完整方案见 `.claude/plans/disk-cleaner-implementation.md`。
+MFT 快扫、重复文件、SQLite 快照持久化、代码签名与自动更新。
+完整方案见 `.claude/plans/disk-cleaner-implementation.md`。

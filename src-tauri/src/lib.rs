@@ -1,3 +1,5 @@
+mod auto_clean;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -805,8 +807,38 @@ async fn llm_ask_followup(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn get_auto_clean_status() -> Result<auto_clean::AutoCleanStatus, String> {
+    auto_clean::status()
+}
+
+#[tauri::command]
+fn set_auto_clean_config(
+    config: auto_clean::AutoCleanConfig,
+) -> Result<auto_clean::AutoCleanStatus, String> {
+    auto_clean::set_config(config)
+}
+
+#[tauri::command]
+async fn run_auto_clean_now() -> Result<CleanupResult, String> {
+    tauri::async_runtime::spawn_blocking(|| auto_clean::run_auto_clean(true))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::args().any(|argument| argument == "--auto-clean") {
+        let exit_code = match auto_clean::run_auto_clean(false) {
+            Ok(_) => 0,
+            Err(error) => {
+                auto_clean::mark_headless_failure(&error);
+                1
+            }
+        };
+        std::process::exit(exit_code);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
@@ -827,7 +859,10 @@ pub fn run() {
             llm_test_connection,
             llm_preview_payload,
             llm_assess_finding,
-            llm_ask_followup
+            llm_ask_followup,
+            get_auto_clean_status,
+            set_auto_clean_config,
+            run_auto_clean_now
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,8 +7,10 @@ CC DiskSage 默认完全本地运行，无遥测。LLM 是可选功能，默认�
 | 数据 | 位置 |
 |---|---|
 | 设置 | `%APPDATA%\cc-disksage\llm.json`（不含 API Key） |
+| 自动清理设置 | `%APPDATA%\cc-disksage\auto-clean.json` |
 | API Key | Windows 凭据管理器，service `cc-disksage.llm` |
 | 审计日志 | `%LOCALAPPDATA%\cc-disksage\logs\audit.jsonl` |
+| 自动清理日志 | `%LOCALAPPDATA%\cc-disksage\logs\auto-clean.jsonl`（仅计数、状态与说明，不含路径） |
 | 隔离区（未来） | `%LOCALAPPDATA%\cc-disksage\quarantine\` |
 | 用户规则 | `%LOCALAPPDATA%\cc-disksage\rules\*.toml` |
 
@@ -47,4 +49,5 @@ CC DiskSage 默认完全本地运行，无遥测。LLM 是可选功能，默认�
 ## 审计
 
 每次清理写入本地 JSONL：计划 ID、规则、动作、路径、字节、结果、时间、是否提权。
+自动清理另写 `auto-clean.jsonl`，只记录时间、状态、释放字节、删除/失败数量与说明，不记录文件路径。
 LLM 调用审计（provider/model/payload hash/token）属于后续里程碑；当前不会记录 payload 或 Key。

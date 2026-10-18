@@ -23,20 +23,21 @@
 - 管理员级系统清理：Windows Temp、机器级 WER、Minidump、传递优化、Windows Update 下载缓存、DISM 分析/清理、休眠文件；通过 UAC 提权 `disksage-helper.exe` 执行
 - 系统引导动作：Windows.old（打开磁盘清理）、系统还原点（系统保护）、分页文件（系统属性 → 虚拟内存）
 - 回收站清空：通过系统 API 执行，明确不可恢复
+- 定时 / 低空间自动清理：Windows 计划任务运行无窗口 `--auto-clean`，仅处理安全、默认勾选、可重建、无需管理员的缓存；可选永久删除或回收站
 - LLM 设置（OpenAI 兼容 / Ollama `/v1`）、payload 预览与同意、逐项 AI 分析、继续追问
 - 历史记录页（读取本地审计日志）
-- NSIS 安装包（offline WebView2 / lite 两种配置）
+- NSIS 安装包（offline WebView2 / lite 两种配置）；卸载时移除计划任务
 
 尚未实现（后续里程碑）：
 
 - NTFS MFT 秒扫
 - 重复文件查找
-- 定时 / 低空间自动清理
 - 自动更新与代码签名
 
 ## 安全模型
 
 - 默认删除到回收站；永久删除只允许可重建缓存并需要二次确认。
+- 自动清理是显式启用的独立模式：只接受 `risk=safe`、默认勾选、`recoverability=regenerable`、无需管理员的文件规则；默认仍进入回收站，启用永久删除时 UI 会再次确认。计划任务由当前用户注册，不弹 UAC，可随时停用。
 - 管理员动作只通过 UAC 提权 helper 执行：helper 重新加载编译进二进制的规则、重新扫描目标、再次校验红线，只执行固定动作；服务名有白名单，DISM 不使用 `/ResetBase`。
 - 系统引导动作（Windows.old/还原点/分页文件）只打开 Windows 系统界面，不直接删除；回收站清空需要单独确认，清空后不可恢复。
 - 规则只能引用固定动作枚举，TOML 中不存在任意命令或参数。
@@ -52,13 +53,27 @@
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
 | `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 211 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 3.7 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 3.8 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
 
 安装为当前用户（`%LOCALAPPDATA%\CC DiskSage`），不需要管理员。当前未签名，
 SmartScreen 可能提示。
+
+### 自动清理
+
+设置页可启用「自动清理（仅安全规则）」：
+
+- 通过当前用户计划任务 `CC DiskSage Auto Clean` 运行 `cc-disksage.exe --auto-clean`；
+  可选每天或每周日 12:00。
+- 仅当系统盘剩余空间低于设定阈值（0 = 每次运行）时执行。
+- 仅选择安全、默认勾选、可重建、无需管理员权限的规则；谨慎/危险/系统项永远不会自动执行。
+- 只使用编译进二进制的内置规则，不加载用户自定义规则。
+- 默认删除到回收站；可选「永久删除可重建缓存」，首次启用需勾选二次确认。
+  计划任务运行时不会弹窗，永久删除的授权以启用时的确认为准。
+- 每次运行写入 `%LOCALAPPDATA%\cc-disksage\logs\auto-clean.jsonl`，并更新设置页最近运行状态。
+- 计划任务只在当前用户登录时运行；卸载安装包时会自动删除该任务。
 
 ### 已验证
 
@@ -68,9 +83,13 @@ SmartScreen 可能提示。
 - C 盘真实只读扫描与快速扫描（含管理员规则）
 - helper 非管理员环境拒绝执行并写出结果；服务/目录/DISM 动作单元测试通过
 - 快速扫描出现 Windows.old / 还原点 / 分页文件 / 回收站维护项；引导程序路径已核验
+- 计划任务非管理员创建/查询/删除（`schtasks.exe`，含空格路径与 `--auto-clean` 参数保留）
+- 卸载钩子：安装后创建同名计划任务，静默卸载后任务被自动移除
+- 无窗口 `--auto-clean`：未启用时退出码 1 并记录日志；高于阈值时跳过清理
 - Rust workspace 全部测试 + 前端 3 项测试通过
 - 待验证：offline 包在**干净 Windows 10（无 WebView2、断网）**上的安装（需要 VM）
 - 待人工验证：带管理员项的真实 UAC 清理（建议在 VM 或确认后操作）
+- 待人工验证：启用自动清理后实际到点运行（会清理真实缓存，建议在 VM 或确认后操作）
 
 ## 开发
 

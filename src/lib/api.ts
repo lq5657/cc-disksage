@@ -304,3 +304,35 @@ export async function llmAskFollowup(
 ): Promise<string> {
   return invoke<string>("llm_ask_followup", { findingId, question });
 }
+
+export interface AutoCleanConfig {
+  enabled: boolean;
+  frequency: string;
+  min_free_percent: number;
+  permanent_delete: boolean;
+  last_run: number | null;
+  last_freed_bytes: number;
+  last_deleted: number;
+  last_status: string;
+}
+
+export interface AutoCleanStatus {
+  config: AutoCleanConfig;
+  task_registered: boolean;
+  task_name: string;
+  executable: string | null;
+}
+
+export async function getAutoCleanStatus(): Promise<AutoCleanStatus> {
+  return invoke<AutoCleanStatus>("get_auto_clean_status");
+}
+
+export async function setAutoCleanConfig(
+  config: AutoCleanConfig,
+): Promise<AutoCleanStatus> {
+  return invoke<AutoCleanStatus>("set_auto_clean_config", { config });
+}
+
+export async function runAutoCleanNow(): Promise<CleanupResult> {
+  return invoke<CleanupResult>("run_auto_clean_now");
+}

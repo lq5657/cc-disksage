@@ -29,7 +29,7 @@ if ($Lite) {
     npm run tauri build
 }
 
-$bundle = Join-Path $root "src-tauri\target\release\bundle\nsis"
+$bundle = Join-Path $root "target\release\bundle\nsis"
 $output = Join-Path $root "dist-installers"
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 

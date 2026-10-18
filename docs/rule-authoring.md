@@ -106,6 +106,19 @@ action = { type = "trash" }
 `Guided` 动作只打开系统界面（磁盘清理、系统保护、系统属性），本工具不直接删除。
 `empty_recycle_bin` 通过系统 API 清空回收站，清空后不可恢复。
 
+## 自动清理规则准入
+
+自动清理只加载编译进二进制的内置规则，不加载用户规则，并且只选择同时满足以下条件的项：
+
+- `risk = "safe"`
+- `default_selected = true`
+- `recoverability = "regenerable"`
+- `requires_admin = false`
+- 动作为 `trash` 或 `delete`
+
+因此把规则改为 `caution`、取消默认勾选或标记管理员，都会自动将其排除在定时清理之外。
+自动模式默认仍使用回收站；只有用户显式开启永久删除才会直接释放空间。
+
 ## 第三方应用规则
 
 - 必须记录 `verified_at`、`verified_on` 与路径来源。

@@ -60,12 +60,13 @@ npm run tauri build        # 安装包（目标）
 - M6 OpenAI 兼容 LLM 设置、payload 同意、逐项分析、追问
 - 管理员清理：`disksage-helper.exe` + UAC，Windows Temp/WER/Minidump/Delivery Optimization/
   Windows Update 缓存/DISM Analyze+StartComponentCleanup/休眠文件
-- NSIS 安装包配置（offline WebView2 / lite / helper 侧车）
+- 系统引导（Windows.old/还原点/分页文件）与回收站清空
+- 定时/低空间自动清理：`--auto-clean` 无窗口模式、Task Scheduler、安全规则过滤、设置页、独立日志
+- NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
 
 未实现：
 
-- Windows.old 引导、还原点/分页文件、回收站清空动作
-- MFT 秒扫、重复文件、定时清理、代码签名/自动更新
+- MFT 秒扫、重复文件、代码签名/自动更新
 - SQLite 快照持久化（当前快照在进程内存）
 
 验证基线：
@@ -74,5 +75,6 @@ npm run tauri build        # 安装包（目标）
 - `npm run test` / `npm run build` 通过
 - 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
-- NSIS 安装包已完成静默安装 → 启动 → 卸载验证
-- 安装包：`dist-installers/`（offline 约 210MB / lite 约 3.4MB）
+- 计划任务非管理员创建/查询/删除（含空格路径）、`--auto-clean` 未启用/阈值跳过路径已在真机验证
+- NSIS 安装包已完成静默安装 → 启动 → 卸载验证；卸载钩子会移除自动清理计划任务
+- 安装包：`dist-installers/`（offline 约 211MB / lite 约 3.8MB）
