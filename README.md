@@ -66,15 +66,12 @@
 
 ## 安装包
 
-当前可下载：<https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1>
-
-> 0.2.0 源码与功能验证已完成，但安装包构建因构建机内存不足中断，尚未发布。
-> 下表是当前实际可用的 0.1.1 安装包；0.2.0 构建重试后更新。
+发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0>
 
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
-| `dist-installers/cc-disksage-0.1.1-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.1.1-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.2.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
+| `dist-installers/cc-disksage-0.2.0-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
@@ -85,7 +82,7 @@ SmartScreen 可能提示。
 安装到 D 盘可使用 NSIS 的 `/D` 参数（必须是最后一个参数）：
 
 ```powershell
-Start-Process .\dist-installers\cc-disksage-0.1.1-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
+Start-Process .\dist-installers\cc-disksage-0.2.0-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
 ```
 
 程序安装在 D 盘时，数据目录自动使用 `D:\CCDiskSageData\<用户名>`；安装在系统盘时使用
@@ -239,6 +236,8 @@ powershell -File scripts/build-installer.ps1 -Lite -Sign
 - 修复 DISM 在隐藏重启提示处卡死的问题：`/NoRestart` + 15 分钟超时终止
 - 代码签名：用临时自签名证书完成 signtool 签名/验签；Tauri `signCommand` 成功签名 helper、主程序和 lite 安装包；**按当前决定暂不用于发布**
 - 最终未签名包：安装后的主程序/helper 均为 NotSigned；测试证书与临时 PFX 已清理
+- **大文件与摘要（0.2.0）**：D 盘 600MB fixture 被扫描收录；AI payload 的 `path_template` 为 `D:\CCDiskSageLargeTest\<file>`、默认不含文件名；确认后移到回收站成功，快照从 20 条变为 19 条并持久化；快速扫描后仪表盘显示摘要并可通过「去清理建议」跳转
+- **0.2.0 安装包**：offline 静默覆盖安装到 `D:\CCDiskSage`，版本 0.2.0，数据仍在 D 盘，新增入口正常
 - Rust workspace 全部测试 + 前端测试通过
 - 待验证：offline 包在**干净 Windows 10（无 WebView2、断网）**上的安装（需要 VM）
 - 待人工验证：自动清理实际到点运行（会清理真实缓存，建议在 VM 或确认后操作）

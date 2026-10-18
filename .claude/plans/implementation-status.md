@@ -2,9 +2,8 @@
 
 对应方案：`.claude/plans/disk-cleaner-implementation.md`。
 
-当前发布版 v0.1.1：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
+v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 （offline 约 212 MB、lite 约 4.9 MB；SHA-256 见 Release 附件与 `dist-installers/SHA256SUMS.txt`）。
-v0.2.0 源码与功能验证已完成；安装包构建因构建机内存不足中断，待重试后发布。
 
 ## 已完成
 
@@ -59,6 +58,7 @@ v0.2.0 源码与功能验证已完成；安装包构建因构建机内存不足�
 - 管理员扫描（UAC）：helper 只读扫描并写出 payload；传递优化 5.1GB/55 文件、Windows 更新缓存 799MB/10,956 文件、Windows Temp 505KB/7 文件实测回填
 - 大文件 E2E：D 盘 600MB fixture 被全盘扫描收录；AI payload 的 `path_template` 为 `D:\CCDiskSageLargeTest\<file>`，`sample_files` 为空；确认后移到回收站成功，快照从 20 个大文件变为 19 并持久化
 - 仪表盘摘要 E2E：快速扫描后返回仪表盘显示「上次快速扫描：安全项」，管理员/普通扫描共用该摘要；「去清理建议」跳转正常
+- 0.2.0 安装包：offline 静默覆盖安装到 `D:\CCDiskSage` 成功，`FileVersion/ProductVersion=0.2.0`，数据仍在 D 盘，新按钮入口正常
 - SQLite：内存与文件数据库 roundtrip、重启读取、扫描历史排序通过；实际应用启动创建 `disksage.db`（`scans`、`duplicate_scans`，user_version=1）
 - 数据目录迁移：D 盘安装启动后，DB/日志/扫描与重复结果/审计/WebView2 数据从 C 迁移到 `D:\CCDiskSageData\youda`，C 旧目录已清空
 - 托盘：关闭主窗口后进程继续运行（隐藏到托盘）；窗口隐藏时快速扫描完成通知与隐藏提示均在最终安装包实测弹出

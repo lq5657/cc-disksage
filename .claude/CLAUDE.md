@@ -54,8 +54,7 @@ npm run tauri build        # 安装包（目标）
 
 ## 当前状态（2026-10-18）
 
-当前发布版 v0.1.1：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
-v0.2.0 源码与功能验证已完成，安装包构建因内存不足中断，待重试后发布。
+v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 
 已实现：
 
@@ -102,6 +101,7 @@ v0.2.0 源码与功能验证已完成，安装包构建因内存不足中断，�
 - 管理员扫描（UAC）：传递优化 5.1GB/55 文件、Windows 更新缓存 799MB/10,956 文件、Windows Temp 505KB/7 文件实测
 - 大文件：D 盘 600MB fixture 出现在快照；AI payload 默认掩码文件名为 `<file>` 且不含文件名；
   确认后移到回收站成功，快照持久化移除该条目；仪表盘快速扫描摘要与跳转入口正常
+- 0.2.0 安装包已覆盖安装到 `D:\CCDiskSage`：版本 0.2.0、数据仍在 D 盘、仪表盘摘要与大文件操作入口正常
 - SQLite 文件数据库跨重启 roundtrip、应用启动建库与表结构验证通过
 - 数据迁移：C 盘 `%LOCALAPPDATA%\cc-disksage`、`%APPDATA%\cc-disksage` 和 WebView2 数据已迁移到 `D:\CCDiskSageData\youda`，扫描/重复结果/审计保留
 - 最终 D 盘安装包覆盖安装后：主程序/helper 含新数据目录逻辑；C 盘旧数据目录未重建
