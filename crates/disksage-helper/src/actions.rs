@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 
 const SERVICE_ALLOWLIST: &[&str] = &["wuauserv", "bits", "dosvc"];
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const DISM_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub fn is_elevated() -> bool {
     // SID S-1-16-12288 is the High mandatory level; S-1-16-16384 is System.
@@ -62,6 +63,24 @@ fn output_summary(output: &Output) -> String {
     } else {
         stdout.trim().to_string()
     };
+    truncate_summary(&text)
+}
+
+fn summarize_dism_text(text: &str) -> String {
+    let lines = text
+        .split(['\r', '\n'])
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !(line.starts_with('[') && line.ends_with(']') && line.contains('%'))
+                && !line.contains('\u{FFFD}')
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    truncate_summary(&lines)
+}
+
+fn truncate_summary(text: &str) -> String {
     let mut summary = text.chars().take(2000).collect::<String>();
     if text.chars().count() > 2000 {
         summary.push('…');
@@ -274,20 +293,64 @@ pub fn dism_cleanup(result: &mut CleanupResult) {
 }
 
 fn run_dism(args: &[&str], label: &str, result: &mut CleanupResult) {
-    match command("dism.exe").args(args).output() {
-        Ok(output) => {
-            let code = output.status.code().unwrap_or(-1);
-            let summary = output_summary(&output);
-            result.notes.push(format!(
-                "{label} 退出码 {code}{}：{summary}",
-                if code == 3010 {
-                    "（需要重启）"
-                } else {
-                    ""
-                }
-            ));
+    let mut child = match command("dism.exe")
+        .arg("/English")
+        .args(args)
+        .arg("/NoRestart")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            result.notes.push(format!("{label} 启动失败：{error}"));
+            return;
         }
-        Err(error) => result.notes.push(format!("{label} 启动失败：{error}")),
+    };
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                match child.wait_with_output() {
+                    Ok(output) => {
+                        let code = output.status.code().unwrap_or(-1);
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let raw = if stdout.trim().is_empty() {
+                            stderr
+                        } else {
+                            stdout
+                        };
+                        let summary = summarize_dism_text(&raw);
+                        result.notes.push(format!(
+                            "{label} 退出码 {code}{}：{summary}",
+                            if code == 3010 {
+                                "（需要重启；已使用 /NoRestart，不自动重启）"
+                            } else {
+                                ""
+                            }
+                        ));
+                    }
+                    Err(error) => result.notes.push(format!("{label} 读取输出失败：{error}")),
+                }
+                return;
+            }
+            Ok(None) if started.elapsed() >= DISM_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                result.notes.push(format!(
+                    "{label} 超过 {} 秒未退出，已终止；请检查 Windows\\Logs\\DISM\\dism.log",
+                    DISM_TIMEOUT.as_secs()
+                ));
+                return;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(500)),
+            Err(error) => {
+                result.notes.push(format!("{label} 等待失败：{error}"));
+                return;
+            }
+        }
     }
 }
 
@@ -387,5 +450,18 @@ mod tests {
         let mut result = CleanupResult::default();
         service_cleanup(&["evil-service".into()], &[], &EnvMap::new(), &mut result);
         assert!(result.notes.iter().any(|note| note.contains("allowlisted")));
+    }
+
+    #[test]
+    fn dism_summary_filters_progress_bars() {
+        let text = "Deployment Image Servicing and Management tool\r\n\
+                    [===== 10.0% =====]\r\n\
+                    Component Store (WinSxS) contents:\r\n\
+                    [========== 100.0% ==========]\r\n\
+                    The operation completed successfully.\r\n";
+        let summary = summarize_dism_text(text);
+        assert!(summary.contains("Component Store"));
+        assert!(summary.contains("operation completed successfully"));
+        assert!(!summary.contains('%'));
     }
 }

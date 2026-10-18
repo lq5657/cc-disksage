@@ -26,18 +26,23 @@
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（57 项，5 个 ignored）
+- `cargo test --workspace`：通过（59 项，6 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
 - 真机 C 盘扫描：711,465 文件 / 198,923 目录 / 131.07 GB / 63.2 秒 / 102 个权限错误
 - 快速扫描真机结果（含管理员/维护项，13 项，约 31 秒热缓存）：npm 971MB、Chrome 758MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 24MB、VS Code 12.5MB、Edge 6.7MB、着色器 3.2MB、Windows Update 缓存 838MB（管理员）、Cargo 379MB（谨慎）；回收站/分页文件/还原点引导项已出现（默认不勾选）
 - 自动清理只读候选核验（`reports_auto_candidate_rules_read_only`）：仅 9 条安全规则，npm 971MB、Chrome 757MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 25MB、VS Code 13MB、Edge 7MB、着色器 3.35MB；管理员/谨慎/引导/回收站项均被排除
-- MFT 扫描核心单测：设备路径解析、目录聚合、大小写合并、跳过 reparse/WindowsApps/System Volume Information、节点上限
-- MFT helper 非管理员环境拒绝执行，并写出失败结果；真实提权 MFT 扫描待 UAC 人工验证
+- MFT 扫描核心单测：设备路径解析、目录聚合、大小写合并、跳过 reparse/WindowsApps/System Volume Information/NTFS 元数据、保留 `$WinREAgent`、节点上限
+- MFT helper 非管理员环境拒绝执行，并写出失败结果
+- **真实 MFT 提权扫描（UAC）**：652,696 文件 / 204,702 目录 / 122.57 GiB / 5.76 秒 / 0 读取错误
+- **walker 对比**：718,862 文件 / 200,196 目录 / 131.52 GiB / 59.6 秒 / 102 权限错误；差异主要来自硬链接去重、跳过 reparse/部分系统元数据，以及 walker 对硬链接路径重复计数
 - 重复文件真实只读扫描：首版用户目录 383,119 文件 / 4,563 候选 / 1,681 次哈希 / 20 组 / 约 2.35GB；收紧范围后文档/下载/图片/视频/桌面 714 文件、0 组（该机器当前内容目录无大于 1MB 的重复文件）
 - 重复文件单测：真实重复/唯一内容、最小阈值、取消、跳过 AppData/Tencent/系统目录
-- 代码签名：临时自签名证书 + 临时受信任根完成签名/验签；Tauri `signCommand` 构建 lite 包时成功签名 helper、主程序与安装包，`Get-AuthenticodeSignature` 为 Valid（测试证书已清理）
+- **重复文件真实删除 fixture**：临时目录中保留一个副本、删除另一个到回收站；验证保留文件存在、目标消失、审计写入
+- **管理员 helper 清理（UAC）**：Windows Temp + 机器级 WER + Minidump，删除 233 个文件 / 约 160 MiB；3 个被占用文件按失败返回，审计 elevation=true
+- **DISM Analyze（UAC，只读）**：退出码 3010（需要重启），组件存储实际 23.44GB、备份/禁用功能 15.30GB、11 个可回收包、建议清理；已修复 DISM 在隐藏重启提示处卡死的问题（`/NoRestart` + 15 分钟超时）
+- 代码签名：临时自签名证书 + 临时受信任根完成签名/验签；Tauri `signCommand` 构建 lite 包时成功签名 helper、主程序与安装包，`Get-AuthenticodeSignature` 为 Valid（测试证书已清理）；**按用户决定暂不用于发布**
 - 回收站删除 API：真机通过
 - Windows Credential Manager roundtrip：真机通过
 - helper 非管理员环境拒绝执行并写出结果：真机通过
@@ -48,23 +53,28 @@
 
 ## 未完成（下一阶段）
 
-1. 真实 MFT 提权扫描的基准对比（需要 UAC；与 walker 文件数/大小/耗时对比）。
-2. 自动清理的真实到点运行与托盘通知（需在 VM 或用户确认后验证，可能删除真实缓存）。
-3. SQLite 快照持久化（当前快照与重复结果在进程内存，重启丢失）。
-4. 自动更新、per-machine 安装变体、便携版。
-5. 正式发布代码签名（需要受信任证书；流水线已完成）。
-6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
+1. 自动清理的真实到点运行与托盘通知（需在 VM 或用户确认后验证，可能删除真实缓存；目前只验证了未启用/阈值跳过）。
+2. 重复文件删除的 Tauri UI 点击流程（核心 fixture 删除已验证，UI 尚未手工点通）。
+3. 系统引导项点击流程（Windows.old/还原点/分页文件/回收站）与干净 Win10 断网安装。
+4. SQLite 快照持久化（当前快照与重复结果在进程内存，重启丢失）。
+5. 自动更新、per-machine 安装变体、便携版。
+6. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
+7. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
 
 ## 已知限制
 
 - 全盘扫描无管理员权限时无法读取部分系统目录（显示错误计数）；MFT 扫描通过 UAC helper 读取。
 - MFT 扫描只支持 NTFS；跳过 reparse point 与 NTFS 元数据，大小按逻辑文件大小聚合。
+- MFT 对硬链接只计一次，因此总量可能低于 walker；walker 会把同一份硬链接数据按路径重复计数。两种引擎对 `$WinREAgent`/系统目录的取舍也略有不同。
+- 管理员 Temp/WER/Minidump 清理实测 3 个占用文件返回失败；文件动作使用回收站，`freed_bytes` 更接近“已处理字节”，不一定立即反映磁盘可用空间。
+- DISM 操作可能返回 3010（需要重启），不会自动重启；超时 15 分钟会终止并提示检查 `dism.log`。
 - treemap 使用逻辑大小；硬链接/稀疏文件的分配大小精确统计属于后续优化。
 - 重复文件默认只扫描文档/下载/图片/视频/桌面；不扫描 AppData 与应用内部目录，可能漏掉部分重复项。
 - 重复扫描会读取候选文件内容做哈希；结果仅保存在内存，重启后需重新扫描。
 - 自动清理只在计划任务触发时检查低空间阈值，不是常驻监控；任务仅在用户登录时运行。
 - 自动清理默认进入回收站；开启永久删除后才会立即释放空间。计划任务被外部移除时，需要在设置页重新保存。
-- 代码签名流水线需要外部证书；当前 dist 包不再带测试签名（最终构建会重建未签名包）。
+- 自动清理实际到点运行尚未验证；目前只验证了未启用/阈值跳过和底层 helper 清理。
+- 代码签名按用户决定暂缓；流水线保留，当前发布包未签名。
 - 产品公开名 `DiskSage` 已被其他项目使用，发布前需改名/确认。
 - 安装包未签名，SmartScreen 可能提示。
 - Lite 安装包要求目标机已有 WebView2；缺失时 bootstrapper 会尝试联网。

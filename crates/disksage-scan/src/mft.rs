@@ -16,6 +16,16 @@ const DEFAULT_LARGE_FILE_BYTES: u64 = 500 * 1024 * 1024;
 const DEFAULT_TOP_LARGE_FILES: usize = 200;
 const MAX_COLLECTED_LARGE_FILES: usize = 10_000;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+const NTFS_METADATA_ROOTS: &[&str] = &[
+    "$MFT", "$MFTMirr", "$LogFile", "$Volume", "$AttrDef", "$Bitmap", "$Boot", "$BadClus",
+    "$Secure", "$UpCase", "$Extend", "$Quota", "$ObjId", "$Reparse", "$UsnJrnl", "$Deleted",
+];
+
+fn is_ntfs_metadata_root(name: &str) -> bool {
+    NTFS_METADATA_ROOTS
+        .iter()
+        .any(|metadata| metadata.eq_ignore_ascii_case(name))
+}
 
 #[derive(Debug, Clone)]
 pub struct MftScanRequest {
@@ -105,7 +115,7 @@ impl TreeBuilder {
         if components.iter().any(|component| is_skipped_dir(component)) {
             return;
         }
-        if components[0].starts_with('$') {
+        if is_ntfs_metadata_root(&components[0]) {
             return;
         }
 
@@ -467,6 +477,19 @@ mod tests {
         assert_eq!(snapshot.top_dirs[0].children.len(), 1);
         assert_eq!(snapshot.top_dirs[0].children[0].file_count, 2);
         assert!(snapshot.top_dirs[0].children[0].children.is_empty());
+    }
+
+    #[test]
+    fn keeps_recovery_staging_but_skips_ntfs_metadata() {
+        let mut builder = TreeBuilder::new('C', 100, 1000);
+        add_file(&mut builder, &["$WinREAgent", "Backup", "winre.wim"], 100);
+        add_file(&mut builder, &["$Extend", "$UsnJrnl", "x"], 100);
+        add_file(&mut builder, &["$MFT"], 100);
+        let snapshot = builder.finish(0, 10, 0, 200);
+        assert_eq!(snapshot.file_count, 1);
+        assert_eq!(snapshot.allocated_bytes, 100);
+        assert_eq!(snapshot.top_dirs.len(), 1);
+        assert_eq!(snapshot.top_dirs[0].name, "$WinREAgent");
     }
 
     #[test]

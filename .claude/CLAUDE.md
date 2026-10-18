@@ -80,12 +80,17 @@ npm run tauri build        # 安装包（目标）
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
 - 计划任务非管理员创建/查询/删除（含空格路径）、`--auto-clean` 未启用/阈值跳过路径已在真机验证
 - MFT 聚合/路径/跳过规则单测通过；非管理员 helper 拒绝 MFT 任务
+- 真实 MFT 提权扫描（UAC）：652,696 文件 / 204,702 目录 / 122.57 GiB / 5.76s；walker 对比 59.6s
 - 重复文件真实内容目录只读扫描通过；硬链接、阈值、跳过 AppData/腾讯数据、取消测试通过
-- 代码签名：自签名证书验证 signtool 与 Tauri `signCommand`（helper/主程序/安装包）
+- 重复文件真实删除 fixture：保留一个、另一个进回收站、审计写入
+- 管理员 helper 清理（UAC）：Windows Temp/WER/Minidump 删除 233 文件 / 约 160 MiB，3 个占用文件失败；审计 elevation=true
+- DISM Analyze（UAC）：3010 需重启；已修复 DISM 隐藏重启提示卡死（/NoRestart + 15 分钟超时）
+- 代码签名流水线验证通过，但按当前决定暂不用于发布
 - NSIS 安装包已完成静默安装 → 启动 → 卸载验证；卸载钩子会移除自动清理计划任务
 - 安装包：`dist-installers/`（offline 约 211MB / lite 约 3.9MB）
 
 待人工验证：
 
-- 真实 MFT 提权扫描（需要 UAC）
-- 正式发布签名（需要受信任证书）
+- 自动清理实际到点运行（会清理真实缓存）
+- 系统引导项与重复文件删除 UI 点击流程
+- 干净 Windows 10 断网安装（VM）

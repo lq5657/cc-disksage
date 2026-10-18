@@ -24,25 +24,27 @@
 - [ ] 浏览器仍保持登录；Cookie、历史、书签未变
 - [ ] 微信/QQ/WPS 聊天记录、图片、文档未变（如适用）
 - [ ] 锁定文件被跳过并报告，不强制删除
-- [ ] 管理员项触发 UAC；helper 重新扫描；Windows Temp / Windows Update 缓存可清理
+- [x] 管理员项触发 UAC；helper 重新扫描；Windows Temp/WER/Minidump 清理实测（233 文件/约 160MiB，3 个占用文件失败）
 - [ ] 服务（wuauserv/bits/dosvc）在清理后恢复原本运行状态
-- [ ] DISM Analyze 只读输出正常；StartComponentCleanup 不使用 /ResetBase
-- [ ] helper 在非管理员环境拒绝执行
-- [ ] 审计日志包含 elevation=true 的管理员记录
+- [x] DISM Analyze 只读输出正常；StartComponentCleanup 不使用 /ResetBase（3010/需重启，已加 /NoRestart 与超时）
+- [x] helper 在非管理员环境拒绝执行
+- [x] 审计日志包含 elevation=true 的管理员记录
 - [ ] Windows.old 引导打开 cleanmgr；还原点打开系统保护；分页文件打开系统属性
 - [ ] 回收站清空通过系统 API 执行；清空后不可恢复提示正确
 - [ ] 系统引导项不会直接删除文件
-- [ ] 设置页启用自动清理 → 计划任务出现；停用 → 计划任务移除
-- [ ] 自动清理只包含安全/默认/可重建/非管理员项，谨慎/危险项不执行
-- [ ] 剩余空间高于阈值时计划运行跳过；低于阈值时执行并写 `auto-clean.jsonl`
-- [ ] 自动清理默认进回收站；永久删除开关首次启用有二次确认
-- [ ] 卸载后计划任务 `CC DiskSage Auto Clean` 被移除
-- [ ] MFT 秒扫触发 UAC；helper 只读扫描；结果与普通扫描文件数/大小对比合理；treemap 可下钻
+- [x] 设置页启用自动清理 → 计划任务出现；停用 → 计划任务移除（计划任务创建/删除已验证）
+- [x] 自动清理只包含安全/默认/可重建/非管理员项，谨慎/危险项不执行（只读候选核验）
+- [x] 剩余空间高于阈值时计划运行跳过，并写 `auto-clean.jsonl`
+- [ ] 低于阈值/到点时实际执行一次并验证结果
+- [x] 自动清理默认进回收站；永久删除开关首次启用有二次确认
+- [x] 卸载后计划任务 `CC DiskSage Auto Clean` 被移除
+- [x] MFT helper 提权扫描实际通过（652,696 文件 / 204,702 目录 / 122.57GiB / 5.76s / 0 读取错误）
+- [ ] 应用内点击 MFT 秒扫按钮、UAC、快照回读与 treemap 下钻完整 UI 流程
 - [ ] 非 NTFS 卷点击 MFT 秒扫被拒绝并提示使用普通扫描；UAC 取消不影响普通扫描
-- [ ] 重复文件扫描只覆盖用户内容目录；AppData/Tencent/node_modules 不出现
-- [ ] 重复文件至少保留一个才能删除；删除进回收站可恢复；路径/大小变化后拒绝删除
-- [ ] 重复文件删除后前端只传 ID；审计日志包含 duplicate 删除记录
-- [ ] 签名安装包 `signtool verify /pa` / `Get-AuthenticodeSignature` 为 Valid；安装后的主程序与 helper 也有有效签名
+- [ ] 重复文件扫描 UI 只覆盖用户内容目录；AppData/Tencent/node_modules 不出现（扫描核心已验证）
+- [x] 重复文件至少保留一个才能删除；删除进回收站可恢复；路径/大小变化后拒绝删除（核心 fixture 验证）
+- [ ] 重复文件删除 Tauri UI 点击流程与 ID-only IPC（核心 fixture 验证）
+- [ ] 签名安装包验证（当前决定暂缓签名）
 - [ ] 审计日志与历史页记录正确
 - [ ] LLM：payload 预览 → 同意 → 分析；无 Key/断网时回退
 - [ ] LLM 输出含数字/未知证据 ID 时被拒绝

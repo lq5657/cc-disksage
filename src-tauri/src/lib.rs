@@ -1240,6 +1240,72 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "moves fixture files to the real recycle bin; run manually"]
+    fn duplicate_delete_fixture_end_to_end() {
+        use std::fs;
+
+        let root = std::env::temp_dir().join(format!("ccds-dup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let keep = root.join("keep.bin");
+        let delete = root.join("delete.bin");
+        let unique = root.join("unique.bin");
+        let content = vec![7u8; 4096];
+        fs::write(&keep, &content).unwrap();
+        fs::write(&delete, &content).unwrap();
+        fs::write(&unique, vec![8u8; 4096]).unwrap();
+
+        let mut request = DuplicateRequest::new(vec![root.clone()]);
+        request.min_size = 1;
+        let scan = find_duplicates(request, |_| {}, CancelToken::new()).unwrap();
+        let group = scan
+            .groups
+            .iter()
+            .find(|group| group.files.len() == 2)
+            .expect("duplicate group should exist");
+        let delete_file = group
+            .files
+            .iter()
+            .find(|file| file.path != keep)
+            .expect("delete fixture");
+        assert_eq!(delete_file.path, delete);
+
+        let candidate = PlanCandidate {
+            finding_id: group.id.clone(),
+            rule_id: "duplicates.user_selected".into(),
+            title_zh: "重复文件（测试）".into(),
+            risk: RiskLevel::Caution,
+            recoverability: Recoverability::RecycleBin,
+            requires_admin: false,
+            action: ActionSpec::Trash,
+            files: vec![delete.clone()],
+            allowed_roots: vec![root.clone()],
+        };
+        let env: HashMap<String, String> = std::env::vars().collect();
+        let plan = build_plan(vec![candidate], &env).unwrap();
+        let audit = AuditLog::new(root.join("audit.jsonl"));
+        let result = run_plan(
+            &plan,
+            &env,
+            ExecutionOptions {
+                confirm: true,
+                dry_run: false,
+                elevation: false,
+            },
+            Some(&audit),
+        )
+        .unwrap();
+
+        assert!(result.failed.is_empty());
+        assert_eq!(result.deleted, 1);
+        assert!(keep.exists());
+        assert!(!delete.exists());
+        assert!(unique.exists());
+        let audit_text = fs::read_to_string(root.join("audit.jsonl")).unwrap();
+        assert!(audit_text.contains("duplicates.user_selected"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn prune_snapshot_limits_top_dirs_and_large_files() {
         let mut snapshot = ScanSnapshot {
             volume: 'C',
