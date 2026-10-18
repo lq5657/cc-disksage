@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use disksage_core::{CleanupResult, ScanSnapshot};
+use disksage_core::{CleanupResult, ScanPayload, ScanSnapshot};
 use serde::{Deserialize, Serialize};
 
 pub const JOB_TTL_SECONDS: i64 = 900;
@@ -31,6 +31,10 @@ pub fn result_path(job_path: &Path) -> PathBuf {
 
 pub fn snapshot_path(job_path: &Path) -> PathBuf {
     job_path.with_extension("snapshot.json")
+}
+
+pub fn scan_payload_path(job_path: &Path) -> PathBuf {
+    job_path.with_extension("scan.json")
 }
 
 pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String> {
@@ -100,6 +104,14 @@ pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String
                 return Err("invalid volume letter".into());
             }
         }
+        "quick_scan" => {
+            if !job.rule_ids.is_empty() {
+                return Err("quick_scan job must not specify rules".into());
+            }
+            if job.volume.is_some() {
+                return Err("quick_scan job must not specify a volume".into());
+            }
+        }
         other => return Err(format!("unsupported task: {other}")),
     }
 
@@ -114,6 +126,11 @@ pub fn write_result(path: &Path, result: &CleanupResult) -> Result<(), String> {
 pub fn write_snapshot(path: &Path, snapshot: &ScanSnapshot) -> Result<(), String> {
     let text = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
     fs::write(path, text).map_err(|error| format!("cannot write snapshot: {error}"))
+}
+
+pub fn write_scan_payload(path: &Path, payload: &ScanPayload) -> Result<(), String> {
+    let text = serde_json::to_string(payload).map_err(|error| error.to_string())?;
+    fs::write(path, text).map_err(|error| format!("cannot write scan payload: {error}"))
 }
 
 pub fn write_error_result(job_path: &Path, message: String) {
@@ -218,6 +235,36 @@ mod tests {
             ..job
         };
         fs::write(&path, serde_json::to_string(&bad).unwrap()).unwrap();
+        assert!(load_job(&path, temp.path()).is_err());
+    }
+
+    #[test]
+    fn accepts_admin_quick_scan_job_and_rejects_scope_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("quick-scan.json");
+        let job = HelperJob {
+            task: "quick_scan".into(),
+            job_id: "quick-scan".into(),
+            nonce: "0123456789abcdef".into(),
+            expires_at: Utc::now().timestamp() + 300,
+            rule_ids: Vec::new(),
+            volume: None,
+        };
+        fs::write(&path, serde_json::to_string(&job).unwrap()).unwrap();
+        assert!(load_job(&path, temp.path()).is_ok());
+
+        let with_rule = HelperJob {
+            rule_ids: vec!["system.windows_temp".into()],
+            ..job.clone()
+        };
+        fs::write(&path, serde_json::to_string(&with_rule).unwrap()).unwrap();
+        assert!(load_job(&path, temp.path()).is_err());
+
+        let with_volume = HelperJob {
+            volume: Some("C".into()),
+            ..job
+        };
+        fs::write(&path, serde_json::to_string(&with_volume).unwrap()).unwrap();
         assert!(load_job(&path, temp.path()).is_err());
     }
 }

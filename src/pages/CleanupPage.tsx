@@ -12,6 +12,7 @@ import {
   Sparkles,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import {
   createPlan,
@@ -20,6 +21,8 @@ import {
   llmAssessFinding,
   llmPreviewPayload,
   quickScan,
+  quickScanAdmin,
+  type CleanupProgress,
   type CleanupResult,
   type Evidence,
   type Finding,
@@ -55,6 +58,15 @@ const RECOVER_LABEL: Record<Recoverability, string> = {
   quarantine: "隔离区可恢复",
   irreversible: "不可恢复",
   user_data: "用户数据（不应清理）",
+};
+
+const CLEANUP_PHASE_LABEL: Record<string, string> = {
+  preparing: "准备清理",
+  deleting: "正在删除",
+  recycle_bin: "正在清空回收站",
+  admin: "管理员项",
+  guided: "正在打开系统设置",
+  done: "清理完成",
 };
 
 const VERDICT_LABEL: Record<LlmAssessment["verdict"], string> = {
@@ -429,18 +441,74 @@ function EvidenceDrawer({
   );
 }
 
+function CleanupProgressPanel({
+  progress,
+}: {
+  progress: CleanupProgress | null;
+}) {
+  const total = progress?.total ?? 0;
+  const processed = progress?.processed ?? 0;
+  const ratio = total > 0 ? Math.min(processed / total, 1) : 0;
+  const indeterminate =
+    !progress || (progress.phase === "admin" && progress.processed === 0);
+
+  return (
+    <div className="rounded-xl border border-emerald-700/20 bg-emerald-50/70 p-3 dark:border-emerald-300/20 dark:bg-emerald-500/10">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="font-medium">
+          {CLEANUP_PHASE_LABEL[progress?.phase ?? ""] ?? "正在执行…"}
+        </span>
+        <span className="text-emerald-900/60 dark:text-emerald-100/60">
+          {processed.toLocaleString()} / {total.toLocaleString()} 个文件 ·{" "}
+          {formatBytes(progress?.bytes ?? 0)} ·{" "}
+          {((progress?.elapsed_ms ?? 0) / 1000).toFixed(1)}s
+        </span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-900/10 dark:bg-emerald-100/10">
+        {indeterminate ? (
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-600 dark:bg-emerald-400" />
+        ) : (
+          <div
+            className="h-full rounded-full bg-emerald-600 transition-all dark:bg-emerald-400"
+            style={{ width: `${Math.max(ratio * 100, 2)}%` }}
+          />
+        )}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px] text-emerald-900/55 dark:text-emerald-100/55">
+        <span className="max-w-[70%] truncate font-mono">
+          {progress?.current || "正在准备…"}
+        </span>
+        <span>
+          删除 {(progress?.deleted ?? 0).toLocaleString()} · 失败{" "}
+          {(progress?.failed ?? 0).toLocaleString()}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PlanPreviewModal({
   preview,
   confirmed,
   executing,
+  progress,
+  permanent,
+  permanentConfirmed,
   onConfirmedChange,
+  onPermanentChange,
+  onPermanentConfirmedChange,
   onCancel,
   onExecute,
 }: {
   preview: PlanPreview;
   confirmed: boolean;
   executing: boolean;
+  progress: CleanupProgress | null;
+  permanent: boolean;
+  permanentConfirmed: boolean;
   onConfirmedChange: (value: boolean) => void;
+  onPermanentChange: (value: boolean) => void;
+  onPermanentConfirmedChange: (value: boolean) => void;
   onCancel: () => void;
   onExecute: () => void;
 }) {
@@ -452,6 +520,15 @@ function PlanPreviewModal({
   const onlyGuided =
     preview.items.length > 0 &&
     preview.items.every((item) => item.action === "guided");
+  const canPermanent =
+    preview.items.length > 0 &&
+    preview.items.every(
+      (item) =>
+        item.action === "file" &&
+        !item.requires_admin &&
+        item.recoverability === "regenerable" &&
+        item.risk !== "danger",
+    );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/30 p-4 backdrop-blur-sm">
@@ -476,6 +553,8 @@ function PlanPreviewModal({
         </header>
 
         <div className="space-y-4 overflow-y-auto p-5">
+          {executing ? <CleanupProgressPanel progress={progress} /> : null}
+
           {preview.warnings.length > 0 ? (
             <div className="space-y-1 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
               {preview.warnings.map((warning) => (
@@ -514,7 +593,8 @@ function PlanPreviewModal({
                       ? "系统界面"
                       : item.action === "recycle_bin"
                         ? "以系统为准"
-                        : item.requires_admin && item.bytes === 0
+                        : item.requires_admin &&
+                            item.size_provenance !== "helper"
                           ? "待提权实测"
                           : formatBytes(item.bytes)}
                   </div>
@@ -523,7 +603,8 @@ function PlanPreviewModal({
                       ? "打开系统设置"
                       : item.action === "recycle_bin"
                         ? "系统 API"
-                        : item.requires_admin && item.file_count === 0
+                        : item.requires_admin &&
+                            item.size_provenance !== "helper"
                           ? "执行时扫描"
                           : `${item.file_count.toLocaleString()} 个文件`}
                   </div>
@@ -543,7 +624,7 @@ function PlanPreviewModal({
               <AlertTriangle className="mb-1 h-4 w-4" />
               计划包含管理员项。执行时会弹出 Windows UAC 授权框；请在弹窗中允许
               disksage-helper.exe。helper 会重新扫描管理员目录、再次校验红线，并只执行规则定义的动作。
-              管理员项的预览大小可能为 0 或不完整。
+              未做管理员扫描时，管理员项的预览大小可能为 0 或不完整。
             </div>
           ) : null}
 
@@ -558,6 +639,38 @@ function PlanPreviewModal({
           {hasIrreversible ? (
             <div className="rounded-xl bg-rose-50 p-3 text-xs text-rose-800 dark:bg-rose-500/10 dark:text-rose-200">
               计划中包含不可恢复项目，请确认后再执行。
+            </div>
+          ) : null}
+
+          {canPermanent ? (
+            <div className="rounded-xl border border-amber-300/50 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <label className="flex items-start gap-2 font-medium">
+                <input
+                  type="checkbox"
+                  checked={permanent}
+                  onChange={(event) => onPermanentChange(event.target.checked)}
+                  disabled={executing}
+                  className="mt-0.5 h-4 w-4 accent-rose-600"
+                />
+                永久删除可重建缓存（更快，不进入回收站）
+              </label>
+              <p className="mt-1 pl-6 text-amber-900/70 dark:text-amber-200/70">
+                回收站需要为每个文件创建系统记录，大缓存会明显更慢。永久删除不会写入回收站。
+              </p>
+              {permanent ? (
+                <label className="mt-2 flex items-start gap-2 pl-6 font-medium text-rose-700 dark:text-rose-300">
+                  <input
+                    type="checkbox"
+                    checked={permanentConfirmed}
+                    onChange={(event) =>
+                      onPermanentConfirmedChange(event.target.checked)
+                    }
+                    disabled={executing}
+                    className="mt-0.5 h-4 w-4 accent-rose-600"
+                  />
+                  我了解：这些文件永久删除后无法通过回收站恢复
+                </label>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -585,7 +698,7 @@ function PlanPreviewModal({
             <button
               type="button"
               onClick={onExecute}
-              disabled={!confirmed || executing}
+              disabled={!confirmed || (permanent && !permanentConfirmed) || executing}
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
             >
               {executing ? (
@@ -594,10 +707,14 @@ function PlanPreviewModal({
                 <Trash2 className="h-4 w-4" />
               )}
               {executing
-                ? "正在清理…"
+                ? permanent
+                  ? "正在永久删除…"
+                  : "正在清理…"
                 : onlyGuided
                   ? "打开系统设置"
-                  : "执行清理"}
+                  : permanent
+                    ? "永久删除"
+                    : "执行清理"}
             </button>
           </div>
         </footer>
@@ -610,6 +727,7 @@ export default function CleanupPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
+  const [adminScanning, setAdminScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<Finding | null>(null);
   const [scanned, setScanned] = useState(false);
@@ -617,27 +735,52 @@ export default function CleanupPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [progress, setProgress] = useState<CleanupProgress | null>(null);
+  const [permanent, setPermanent] = useState(false);
+  const [permanentConfirmed, setPermanentConfirmed] = useState(false);
   const [result, setResult] = useState<CleanupResult | null>(null);
+
+  function applyFindings(findingsResult: Finding[]) {
+    setFindings(findingsResult);
+    setSelected(
+      new Set(
+        findingsResult
+          .filter((finding) => finding.default_selected && finding.risk === "safe")
+          .map((finding) => finding.id),
+      ),
+    );
+    setScanned(true);
+  }
 
   async function handleScan() {
     setScanning(true);
     setError(null);
     setResult(null);
     try {
-      const findingsResult = await quickScan();
-      setFindings(findingsResult);
-      setSelected(
-        new Set(
-          findingsResult
-            .filter((finding) => finding.default_selected && finding.risk === "safe")
-            .map((finding) => finding.id),
-        ),
-      );
-      setScanned(true);
+      applyFindings(await quickScan());
     } catch (scanError) {
       setError(String(scanError));
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function handleAdminScan() {
+    setAdminScanning(true);
+    setError(null);
+    setResult(null);
+    try {
+      const response = await quickScanAdmin();
+      applyFindings(response.findings);
+      if (response.admin_error) {
+        setError(
+          `管理员扫描未完成：${response.admin_error}。已保留普通扫描结果，管理员项可能仍显示估算值。`,
+        );
+      }
+    } catch (scanError) {
+      setError(String(scanError));
+    } finally {
+      setAdminScanning(false);
     }
   }
 
@@ -649,6 +792,8 @@ export default function CleanupPage() {
       const plan = await createPlan([...selected]);
       setPreview(plan);
       setConfirmed(false);
+      setPermanent(false);
+      setPermanentConfirmed(false);
     } catch (previewError) {
       setError(String(previewError));
     } finally {
@@ -658,13 +803,21 @@ export default function CleanupPage() {
 
   async function handleExecute() {
     if (!preview || !confirmed) return;
+    if (permanent && !permanentConfirmed) return;
     setExecuting(true);
+    setProgress(null);
     setError(null);
     try {
-      const cleanupResult = await executePlan(preview.plan_id);
+      const cleanupResult = await executePlan(
+        preview.plan_id,
+        permanent,
+        setProgress,
+      );
       setResult(cleanupResult);
       setPreview(null);
       setConfirmed(false);
+      setPermanent(false);
+      setPermanentConfirmed(false);
       setFindings([]);
       setSelected(new Set());
       setScanned(false);
@@ -672,6 +825,7 @@ export default function CleanupPage() {
       setError(String(executeError));
     } finally {
       setExecuting(false);
+      setProgress(null);
     }
   }
 
@@ -791,23 +945,47 @@ export default function CleanupPage() {
             </div>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-emerald-900/60 dark:text-emerald-100/60">
               只扫描已核验的缓存与临时目录；每一项都附带本地证据链、删除影响与恢复方式。
-              管理员级系统清理将在 M4 通过独立 helper 接入。
+              普通扫描无需管理员；「管理员扫描」会请求一次 UAC，通过独立 helper 读取系统缓存
+              目录并给出实测大小，只读不删文件。
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleScan}
-            disabled={scanning}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
-          >
-            {scanning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FileSearch className="h-4 w-4" />
-            )}
-            {scanning ? "扫描中…" : "开始快速扫描"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAdminScan}
+              disabled={scanning || adminScanning}
+              title="通过 UAC 提权 helper 扫描 Windows Temp、WER、更新缓存等系统项（只读）"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-700/30 px-4 py-2.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-300/30 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+            >
+              {adminScanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+              {adminScanning ? "管理员扫描中…" : "管理员扫描"}
+            </button>
+            <button
+              type="button"
+              onClick={handleScan}
+              disabled={scanning || adminScanning}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSearch className="h-4 w-4" />
+              )}
+              {scanning ? "扫描中…" : "开始快速扫描"}
+            </button>
+          </div>
         </div>
+
+        {adminScanning ? (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+            正在请求管理员权限并通过 disksage-helper 重新扫描系统项。取消 UAC 会保留普通扫描结果。
+          </div>
+        ) : null}
 
         {error ? (
           <div className="mt-4 flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800 dark:bg-rose-500/10 dark:text-rose-200">
@@ -848,7 +1026,8 @@ export default function CleanupPage() {
             {formatBytes(selectedBytes)}。
             {findings.some((finding) => finding.requires_admin) ? (
               <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">
-                管理员项在预览中可能显示 0 B；执行时会通过 UAC 提权 helper 重新扫描并校验。
+                普通扫描中管理员项可能显示 0 B；点击「管理员扫描」可先实测，执行时仍会通过
+                UAC 提权 helper 重新扫描并校验。
               </span>
             ) : null}
             {findings.some(
@@ -928,7 +1107,7 @@ export default function CleanupPage() {
                           : isRecycle
                             ? "以系统为准"
                             : finding.requires_admin &&
-                                finding.allocated_bytes === 0
+                                finding.size_provenance !== "helper"
                               ? "待扫描"
                               : formatBytes(finding.allocated_bytes)}
                       </div>
@@ -938,7 +1117,9 @@ export default function CleanupPage() {
                           : isRecycle
                             ? "清空回收站"
                             : finding.requires_admin
-                              ? "提权后实测"
+                              ? finding.size_provenance === "helper"
+                                ? "管理员实测"
+                                : "待管理员扫描"
                               : "measured"}
                       </div>
                     </div>
@@ -997,11 +1178,21 @@ export default function CleanupPage() {
           preview={preview}
           confirmed={confirmed}
           executing={executing}
+          progress={progress}
+          permanent={permanent}
+          permanentConfirmed={permanentConfirmed}
           onConfirmedChange={setConfirmed}
+          onPermanentChange={(value) => {
+            setPermanent(value);
+            if (!value) setPermanentConfirmed(false);
+          }}
+          onPermanentConfirmedChange={setPermanentConfirmed}
           onCancel={() => {
             if (executing) return;
             setPreview(null);
             setConfirmed(false);
+            setPermanent(false);
+            setPermanentConfirmed(false);
           }}
           onExecute={handleExecute}
         />

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,16 @@ pub struct LargeFile {
     pub logical_bytes: u64,
     pub modified_at: Option<Timestamp>,
     pub extension: String,
+}
+
+/// Rust-to-Rust payload written by the elevated helper after an admin-only
+/// quick scan. `Finding.targets` is normally skipped during serialization, so
+/// the resolved roots are carried separately and reattached by the main app.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScanPayload {
+    pub findings: Vec<Finding>,
+    pub matches: HashMap<String, Vec<PathBuf>>,
+    pub targets: HashMap<String, Vec<MatchedPath>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

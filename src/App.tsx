@@ -258,7 +258,7 @@ function Dashboard({
               type="button"
               onClick={onMftScan}
               disabled={scanning || mftScanning}
-              title="需要管理员权限（UAC）。仅支持 NTFS，通常数秒完成。"
+              title="管理员全盘扫描：需要 UAC，通过 helper 读取 NTFS MFT（只读），通常数秒完成。"
               className="inline-flex items-center gap-2 rounded-xl border border-emerald-700/30 px-4 py-2.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-300/30 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
             >
               {mftScanning ? (
@@ -266,7 +266,7 @@ function Dashboard({
               ) : (
                 <Zap className="h-4 w-4" />
               )}
-              {mftScanning ? "读取 MFT…" : "MFT 秒扫"}
+              {mftScanning ? "管理员扫描中…" : "管理员全盘扫描"}
             </button>
           </div>
         </div>
@@ -297,7 +297,7 @@ function Dashboard({
             <div className="mt-2 flex items-center justify-between gap-3">
               <span className="text-[11px] text-emerald-900/45 dark:text-emerald-100/45">
                 {progress && progress.errors > 0
-                  ? `${progress.errors} 个权限错误（系统目录需要管理员扫描）`
+                  ? `${progress.errors} 个权限错误（可改用「管理员全盘扫描」）`
                   : "只读扫描，不会修改任何文件"}
               </span>
               <button
@@ -320,7 +320,8 @@ function Dashboard({
 
         {snapshot && snapshot.error_count > 0 ? (
           <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
-            有 {snapshot.error_count} 个目录/文件因权限或占用无法读取（系统目录需要管理员扫描）。
+            有 {snapshot.error_count} 个目录/文件因权限或占用无法读取；可使用「管理员全盘扫描」
+            查看系统目录占用。
           </p>
         ) : null}
 

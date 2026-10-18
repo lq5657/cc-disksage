@@ -25,6 +25,25 @@ pub fn quick_scan(
     env: &EnvMap,
     include_admin: bool,
 ) -> Result<QuickScanResult, RuleError> {
+    quick_scan_impl(pack, env, include_admin, false)
+}
+
+/// Scan from the elevated helper: admin-rule sizes and evidence are marked as
+/// measured by the helper instead of estimated by the ordinary process.
+pub fn quick_scan_elevated(
+    pack: &RulePack,
+    env: &EnvMap,
+    include_admin: bool,
+) -> Result<QuickScanResult, RuleError> {
+    quick_scan_impl(pack, env, include_admin, true)
+}
+
+fn quick_scan_impl(
+    pack: &RulePack,
+    env: &EnvMap,
+    include_admin: bool,
+    admin_measured: bool,
+) -> Result<QuickScanResult, RuleError> {
     let rules = compile_rules(pack, env, include_admin)?;
     let guard = DeleteGuard::new(env);
 
@@ -38,7 +57,7 @@ pub fn quick_scan(
             {
                 return None;
             }
-            let finding = build_finding(compiled, &files);
+            let finding = build_finding(compiled, &files, admin_measured);
             let paths = files.into_iter().map(|file| file.path).collect();
             Some((finding, paths))
         })
@@ -76,7 +95,7 @@ fn is_action_only(action: &ActionSpec) -> bool {
     )
 }
 
-fn build_finding(compiled: &CompiledRule, files: &[MatchedFile]) -> Finding {
+fn build_finding(compiled: &CompiledRule, files: &[MatchedFile], admin_measured: bool) -> Finding {
     let rule = &compiled.rule;
     let mut allocated_bytes = 0u64;
     let mut file_count = 0u64;
@@ -148,6 +167,7 @@ fn build_finding(compiled: &CompiledRule, files: &[MatchedFile]) -> Finding {
         oldest,
         newest,
         &ext_histogram,
+        admin_measured,
     );
 
     Finding {
@@ -165,7 +185,13 @@ fn build_finding(compiled: &CompiledRule, files: &[MatchedFile]) -> Finding {
         allocated_bytes,
         logical_bytes: allocated_bytes,
         file_count,
-        size_provenance: if rule.requires_admin || is_action_only(&compiled.action) {
+        size_provenance: if rule.requires_admin {
+            if admin_measured {
+                SizeProvenance::Helper
+            } else {
+                SizeProvenance::Estimated
+            }
+        } else if is_action_only(&compiled.action) {
             SizeProvenance::Estimated
         } else {
             SizeProvenance::Scanner
@@ -177,7 +203,11 @@ fn build_finding(compiled: &CompiledRule, files: &[MatchedFile]) -> Finding {
         evidence,
         consequence: {
             let prefix = if rule.requires_admin {
-                "需要管理员权限；执行时由提权 helper 重新扫描并校验，预览大小可能不完整。"
+                if admin_measured {
+                    "管理员项已由提权 helper 扫描；执行时仍会重新扫描并校验。"
+                } else {
+                    "需要管理员权限；执行时由提权 helper 重新扫描并校验，预览大小可能不完整。"
+                }
             } else if is_action_only(&compiled.action) {
                 "该动作不基于文件匹配，会通过 Windows 系统界面或系统 API 完成；本工具不会绕过系统确认。"
             } else {
@@ -205,6 +235,7 @@ fn build_evidence(
     oldest: Option<i64>,
     newest: Option<i64>,
     ext_histogram: &[(String, u64)],
+    admin_measured: bool,
 ) -> Vec<Evidence> {
     let roots = compiled
         .targets
@@ -238,7 +269,11 @@ fn build_evidence(
         claim: if action_only {
             "该规则为系统引导或回收站动作，不扫描文件。".to_string()
         } else if rule.requires_admin {
-            format!("检测到目标目录（未提权，大小可能不完整）：{roots}")
+            if admin_measured {
+                format!("提权扫描检测到目标目录：{roots}")
+            } else {
+                format!("检测到目标目录（未提权，大小可能不完整）：{roots}")
+            }
         } else {
             format!("检测到目标目录：{roots}")
         },

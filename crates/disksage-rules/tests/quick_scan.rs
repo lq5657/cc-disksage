@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use disksage_rules::{RulePack, load_builtin_rules, parse_rule_pack, quick_scan};
+use disksage_rules::{
+    RulePack, load_builtin_rules, parse_rule_pack, quick_scan, quick_scan_elevated,
+};
 
 fn env_for(temp: &Path, windows: Option<&Path>) -> HashMap<String, String> {
     let mut env = HashMap::new();
@@ -206,6 +208,24 @@ action = { type = "trash" }
     ));
     assert!(finding.consequence.contains("管理员"));
     assert!(result.matches.get(&finding.id).unwrap().is_empty());
+
+    let elevated = quick_scan_elevated(&pack, &env, true).unwrap();
+    let elevated_finding = &elevated.findings[0];
+    assert!(matches!(
+        elevated_finding.size_provenance,
+        disksage_core::SizeProvenance::Helper
+    ));
+    assert!(
+        elevated_finding
+            .consequence
+            .contains("已由提权 helper 扫描")
+    );
+    assert!(
+        elevated_finding
+            .evidence
+            .iter()
+            .any(|evidence| evidence.claim.contains("提权扫描检测到目标目录"))
+    );
 }
 
 #[test]

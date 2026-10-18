@@ -245,6 +245,16 @@ export async function quickScan(): Promise<Finding[]> {
   return invoke<Finding[]>("quick_scan");
 }
 
+export interface AdminScanResponse {
+  findings: Finding[];
+  admin_error: string | null;
+  admin_count: number;
+}
+
+export async function quickScanAdmin(): Promise<AdminScanResponse> {
+  return invoke<AdminScanResponse>("quick_scan_admin");
+}
+
 export async function getFinding(findingId: string): Promise<Finding> {
   return invoke<Finding>("get_finding", { findingId });
 }
@@ -300,6 +310,7 @@ export interface PlanPreviewItem {
   file_count: number;
   recoverability: Recoverability;
   requires_admin: boolean;
+  size_provenance: "scanner" | "helper" | "estimated";
   action: string;
 }
 
@@ -321,12 +332,33 @@ export interface CleanupResult {
   notes: string[];
 }
 
+export interface CleanupProgress {
+  phase: string;
+  processed: number;
+  total: number;
+  deleted: number;
+  failed: number;
+  bytes: number;
+  current: string;
+  elapsed_ms: number;
+}
+
 export async function createPlan(findingIds: string[]): Promise<PlanPreview> {
   return invoke<PlanPreview>("create_plan", { findingIds });
 }
 
-export async function executePlan(planId: string): Promise<CleanupResult> {
-  return invoke<CleanupResult>("execute_plan", { planId });
+export async function executePlan(
+  planId: string,
+  permanentDelete: boolean,
+  onProgress?: (progress: CleanupProgress) => void,
+): Promise<CleanupResult> {
+  const channel = new Channel<CleanupProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return invoke<CleanupResult>("execute_plan", {
+    planId,
+    permanentDelete,
+    onProgress: channel,
+  });
 }
 
 export interface LlmPreset {

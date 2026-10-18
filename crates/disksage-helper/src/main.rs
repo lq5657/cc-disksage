@@ -5,9 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use disksage_helper::job::{load_job, result_path, write_error_result, write_result};
-use disksage_helper::run_job;
 #[cfg(windows)]
 use disksage_helper::run_mft_job;
+use disksage_helper::{run_job, run_quick_scan_job};
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -30,11 +30,17 @@ fn main() {
             #[cfg(windows)]
             let result = if job.task == "mft_scan" {
                 run_mft_job(&job, &job_path)
+            } else if job.task == "quick_scan" {
+                run_quick_scan_job(&job, &job_path)
             } else {
                 run_job(&job)
             };
             #[cfg(not(windows))]
-            let result = run_job(&job);
+            let result = if job.task == "quick_scan" {
+                run_quick_scan_job(&job, &job_path)
+            } else {
+                run_job(&job)
+            };
             let path = result_path(&job_path);
             if let Err(error) = write_result(&path, &result) {
                 write_error_result(&job_path, error);

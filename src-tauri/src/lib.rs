@@ -7,17 +7,20 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use disksage_clean::{
-    AuditLog, ExecutionOptions, PlanCandidate, create_plan as build_plan, execute_plan as run_plan,
+    AuditLog, CleanupProgress, ExecutionOptions, PlanCandidate, create_plan as build_plan,
+    execute_plan as run_plan, execute_plan_with_progress as run_plan_with_progress,
 };
 use disksage_core::{
     ActionSpec, CleanupPlan, CleanupResult, DirNode, Finding, GuideId, LlmAssessment, PlanWarning,
-    Recoverability, RiskLevel, ScanSnapshot, VolumeInfo, paths,
+    Recoverability, RiskLevel, ScanPayload, ScanSnapshot, SizeProvenance, VolumeInfo, paths,
 };
 use disksage_llm::{
     LlmClient, LlmConfig, LlmPreset, PRESETS, RedactContext, build_finding_payload, delete_key,
     get_key, payload_json, set_key,
 };
-use disksage_rules::{load_builtin_rules, load_user_rules, quick_scan as run_quick_scan};
+use disksage_rules::{
+    QuickScanResult, load_builtin_rules, load_user_rules, quick_scan as run_quick_scan,
+};
 use disksage_scan::{
     CancelToken, DuplicateRequest, DuplicateScanProgress, DuplicateScanResult, ScanRequest,
     find_duplicates, scan_volume as run_scan,
@@ -176,6 +179,7 @@ struct PlanPreviewItem {
     file_count: u64,
     recoverability: Recoverability,
     requires_admin: bool,
+    size_provenance: SizeProvenance,
     action: String,
 }
 
@@ -367,23 +371,17 @@ fn get_latest_duplicate_scan(
     Ok(result)
 }
 
-#[tauri::command]
-async fn quick_scan(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<Finding>, String> {
-    let result = tauri::async_runtime::spawn_blocking(|| -> Result<_, String> {
-        let env: HashMap<String, String> = std::env::vars().collect();
-        let mut pack = load_builtin_rules().map_err(|error| error.to_string())?;
-        if let Some(directory) = user_rules_dir() {
-            let user = load_user_rules(&directory).map_err(|error| error.to_string())?;
-            pack.rules.extend(user.rules);
-        }
-        run_quick_scan(&pack, &env, true).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("quick scan task failed: {error}"))??;
+fn run_local_quick_scan() -> Result<QuickScanResult, String> {
+    let env: HashMap<String, String> = std::env::vars().collect();
+    let mut pack = load_builtin_rules().map_err(|error| error.to_string())?;
+    if let Some(directory) = user_rules_dir() {
+        let user = load_user_rules(&directory).map_err(|error| error.to_string())?;
+        pack.rules.extend(user.rules);
+    }
+    run_quick_scan(&pack, &env, true).map_err(|error| error.to_string())
+}
 
+fn store_quick_scan(state: &AppState, result: &QuickScanResult) -> Result<(), String> {
     let mut store = state
         .findings
         .lock()
@@ -398,6 +396,47 @@ async fn quick_scan(
             },
         );
     }
+    Ok(())
+}
+
+fn stored_findings(state: &AppState) -> Result<Vec<Finding>, String> {
+    let store = state
+        .findings
+        .lock()
+        .map_err(|_| "finding store lock poisoned".to_string())?;
+    Ok(store
+        .values()
+        .map(|stored| stored.finding.clone())
+        .collect())
+}
+
+fn risk_rank(risk: RiskLevel) -> u8 {
+    match risk {
+        RiskLevel::Safe => 0,
+        RiskLevel::Caution => 1,
+        RiskLevel::Danger => 2,
+    }
+}
+
+fn sort_findings(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| {
+        risk_rank(a.risk)
+            .cmp(&risk_rank(b.risk))
+            .then_with(|| b.allocated_bytes.cmp(&a.allocated_bytes))
+            .then_with(|| a.rule_id.cmp(&b.rule_id))
+    });
+}
+
+#[tauri::command]
+async fn quick_scan(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Finding>, String> {
+    let result = tauri::async_runtime::spawn_blocking(run_local_quick_scan)
+        .await
+        .map_err(|error| format!("quick scan task failed: {error}"))??;
+
+    store_quick_scan(&state, &result)?;
 
     let total_bytes = result
         .findings
@@ -416,6 +455,83 @@ async fn quick_scan(
     Ok(result.findings)
 }
 
+#[derive(Serialize)]
+struct AdminScanResponse {
+    findings: Vec<Finding>,
+    admin_error: Option<String>,
+    admin_count: usize,
+}
+
+/// Refresh the normal findings, then ask the elevated helper to measure the
+/// admin-only rules. The UI gets a complete, freshly measured list; a UAC
+/// cancellation still returns the normal findings together with an error.
+#[tauri::command]
+async fn quick_scan_admin(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<AdminScanResponse, String> {
+    let local = tauri::async_runtime::spawn_blocking(run_local_quick_scan)
+        .await
+        .map_err(|error| format!("quick scan task failed: {error}"))??;
+    store_quick_scan(&state, &local)?;
+
+    let mut admin_error = None;
+    let mut admin_count = 0usize;
+    match run_admin_scan_job().await {
+        Ok(mut payload) => {
+            for finding in &mut payload.findings {
+                if let Some(targets) = payload.targets.remove(&finding.id) {
+                    finding.targets = targets;
+                }
+            }
+            admin_count = payload.findings.len();
+            let mut store = state
+                .findings
+                .lock()
+                .map_err(|_| "finding store lock poisoned".to_string())?;
+            store.retain(|_, stored| !stored.finding.requires_admin);
+            for finding in &payload.findings {
+                store.insert(
+                    finding.id.clone(),
+                    StoredFinding {
+                        finding: finding.clone(),
+                        files: payload
+                            .matches
+                            .get(&finding.id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    },
+                );
+            }
+        }
+        Err(error) => admin_error = Some(error),
+    }
+
+    let mut findings = stored_findings(&state)?;
+    sort_findings(&mut findings);
+    notify(
+        &app,
+        if admin_error.is_some() {
+            "管理员扫描未完成"
+        } else {
+            "管理员扫描完成"
+        },
+        match &admin_error {
+            Some(error) => format!("已保留普通扫描结果：{error}"),
+            None => format!(
+                "{} 个候选项，其中 {} 个管理员项已实测",
+                findings.len(),
+                admin_count
+            ),
+        },
+    );
+    Ok(AdminScanResponse {
+        findings,
+        admin_error,
+        admin_count,
+    })
+}
+
 #[tauri::command]
 fn get_finding(state: tauri::State<'_, AppState>, finding_id: String) -> Result<Finding, String> {
     state
@@ -432,17 +548,19 @@ async fn create_plan(
     state: tauri::State<'_, AppState>,
     finding_ids: Vec<String>,
 ) -> Result<PlanPreview, String> {
-    let candidates = {
+    let (candidates, provenance) = {
         let store = state
             .findings
             .lock()
             .map_err(|_| "finding store lock poisoned".to_string())?;
         let mut candidates = Vec::new();
+        let mut provenance = HashMap::new();
         for finding_id in finding_ids {
             let Some(stored) = store.get(&finding_id) else {
                 continue;
             };
             let finding = &stored.finding;
+            provenance.insert(finding.id.clone(), finding.size_provenance);
             candidates.push(PlanCandidate {
                 finding_id: finding.id.clone(),
                 rule_id: finding.rule_id.clone(),
@@ -459,7 +577,7 @@ async fn create_plan(
                     .collect(),
             });
         }
-        candidates
+        (candidates, provenance)
     };
 
     if candidates.is_empty() {
@@ -488,6 +606,10 @@ async fn create_plan(
                 file_count: item.file_count,
                 recoverability: item.recoverability,
                 requires_admin: item.requires_admin,
+                size_provenance: provenance
+                    .get(&item.finding_id)
+                    .copied()
+                    .unwrap_or(SizeProvenance::Estimated),
                 action: action_kind(&item.action).to_string(),
             })
             .collect(),
@@ -508,6 +630,8 @@ async fn execute_plan(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     plan_id: String,
+    permanent_delete: bool,
+    on_progress: tauri::ipc::Channel<CleanupProgress>,
 ) -> Result<CleanupResult, String> {
     let plan = state
         .plans
@@ -532,6 +656,31 @@ async fn execute_plan(
         }
     }
 
+    if permanent_delete {
+        for item in &normal_items {
+            if !matches!(item.action, ActionSpec::Trash | ActionSpec::Delete)
+                || item.recoverability != Recoverability::Regenerable
+                || item.risk == RiskLevel::Danger
+            {
+                return Err(
+                    "永久删除仅允许可重建且非危险的缓存项；请取消该选项或移除不适用项目。"
+                        .to_string(),
+                );
+            }
+        }
+        for item in &mut normal_items {
+            item.action = ActionSpec::Delete;
+        }
+    }
+
+    let started = std::time::Instant::now();
+    let total_items = normal_items
+        .iter()
+        .map(|item| item.file_count)
+        .fold(0u64, u64::saturating_add)
+        .saturating_add(admin_items.len() as u64)
+        .saturating_add(guided.len() as u64);
+
     let env: HashMap<String, String> = std::env::vars().collect();
     let mut result = CleanupResult {
         job_id: Uuid::new_v4().to_string(),
@@ -550,9 +699,10 @@ async fn execute_plan(
             status: plan.status,
         };
         let normal_env = env.clone();
+        let progress = on_progress.clone();
         let normal_result = tauri::async_runtime::spawn_blocking(move || {
             let audit = AuditLog::new(AuditLog::default_location());
-            run_plan(
+            run_plan_with_progress(
                 &normal_plan,
                 &normal_env,
                 ExecutionOptions {
@@ -561,6 +711,9 @@ async fn execute_plan(
                     elevation: false,
                 },
                 Some(&audit),
+                Some(&mut |progress_value| {
+                    let _ = progress.send(progress_value);
+                }),
             )
         })
         .await
@@ -570,6 +723,13 @@ async fn execute_plan(
     }
 
     if !admin_items.is_empty() {
+        let _ = on_progress.send(CleanupProgress {
+            phase: "admin".into(),
+            total: admin_items.len() as u64,
+            current: "正在请求管理员授权并重新扫描系统项…".into(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            ..CleanupProgress::default()
+        });
         let rule_ids = admin_items
             .iter()
             .map(|item| item.rule_id.clone())
@@ -577,12 +737,41 @@ async fn execute_plan(
             .into_iter()
             .collect::<Vec<_>>();
         match run_admin_job(rule_ids).await {
-            Ok(admin_result) => merge_cleanup_result(&mut result, admin_result),
-            Err(error) => result.notes.push(format!("管理员清理未执行：{error}")),
+            Ok(admin_result) => {
+                let _ = on_progress.send(CleanupProgress {
+                    phase: "admin".into(),
+                    processed: admin_items.len() as u64,
+                    total: admin_items.len() as u64,
+                    deleted: admin_result.deleted,
+                    failed: admin_result.failed.len() as u64,
+                    bytes: admin_result.freed_bytes,
+                    current: "管理员项已处理".into(),
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                });
+                merge_cleanup_result(&mut result, admin_result);
+            }
+            Err(error) => {
+                let _ = on_progress.send(CleanupProgress {
+                    phase: "admin".into(),
+                    processed: admin_items.len() as u64,
+                    total: admin_items.len() as u64,
+                    failed: 1,
+                    current: error.clone(),
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    ..CleanupProgress::default()
+                });
+                result.notes.push(format!("管理员清理未执行：{error}"));
+            }
         }
     }
 
     for guide in guided {
+        let _ = on_progress.send(CleanupProgress {
+            phase: "guided".into(),
+            current: guide_label_zh(guide).to_string(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            ..CleanupProgress::default()
+        });
         match open_guide(guide) {
             Ok(()) => result
                 .notes
@@ -592,6 +781,20 @@ async fn execute_plan(
                 .push(format!("打开 {} 失败：{error}", guide_label_zh(guide))),
         }
     }
+
+    let _ = on_progress.send(CleanupProgress {
+        phase: "done".into(),
+        processed: result
+            .deleted
+            .saturating_add(result.failed.len() as u64)
+            .saturating_add(result.skipped_locked.len() as u64),
+        total: total_items,
+        deleted: result.deleted,
+        failed: result.failed.len() as u64,
+        bytes: result.freed_bytes,
+        current: String::new(),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    });
 
     notify(
         &app,
@@ -736,6 +939,68 @@ async fn run_admin_job(rule_ids: Vec<String>) -> Result<CleanupResult, String> {
         result.notes.push(format!("helper 启动提示：{error}"));
     }
     Ok(result)
+}
+
+async fn run_admin_scan_job() -> Result<ScanPayload, String> {
+    let helper = helper_executable()
+        .ok_or_else(|| "未找到 disksage-helper.exe（请重新安装或构建 helper）".to_string())?;
+    let jobs = jobs_directory();
+    std::fs::create_dir_all(&jobs).map_err(|error| error.to_string())?;
+
+    let job_id = Uuid::new_v4().to_string();
+    let job_path = jobs.join(format!("{job_id}.json"));
+    let result_path = job_path.with_extension("result.json");
+    let payload_path = job_path.with_extension("scan.json");
+    let _ = std::fs::remove_file(&result_path);
+    let _ = std::fs::remove_file(&payload_path);
+
+    let job = HelperJobFile {
+        task: "quick_scan".into(),
+        job_id: job_id.clone(),
+        nonce: Uuid::new_v4().to_string(),
+        expires_at: chrono::Utc::now().timestamp() + 600,
+        rule_ids: Vec::new(),
+        volume: None,
+    };
+    let text = serde_json::to_string_pretty(&job).map_err(|error| error.to_string())?;
+    std::fs::write(&job_path, text).map_err(|error| error.to_string())?;
+
+    let helper_for_launch = helper.clone();
+    let job_for_launch = job_path.clone();
+    let launch = tauri::async_runtime::spawn_blocking(move || {
+        launch_elevated_helper(&helper_for_launch, &job_for_launch)
+    })
+    .await
+    .map_err(|error| format!("helper launch task failed: {error}"))?;
+
+    if !result_path.exists() {
+        return Err(match launch {
+            Ok(()) => "提权 helper 未产生管理员扫描结果".into(),
+            Err(error) => error,
+        });
+    }
+
+    let text = std::fs::read_to_string(&result_path).map_err(|error| error.to_string())?;
+    let helper_result: CleanupResult =
+        serde_json::from_str(&text).map_err(|error| format!("无效的 helper 结果：{error}"))?;
+    if !helper_result.failed.is_empty() {
+        return Err(helper_result
+            .notes
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "管理员扫描失败".into()));
+    }
+    if !payload_path.exists() {
+        return Err("helper 未写出管理员扫描结果".into());
+    }
+    let text = std::fs::read_to_string(&payload_path).map_err(|error| error.to_string())?;
+    let payload: ScanPayload =
+        serde_json::from_str(&text).map_err(|error| format!("无效的管理员扫描结果：{error}"))?;
+
+    let _ = std::fs::remove_file(&job_path);
+    let _ = std::fs::remove_file(&result_path);
+    let _ = std::fs::remove_file(&payload_path);
+    Ok(payload)
 }
 
 async fn run_mft_scan_job(volume: char) -> Result<ScanSnapshot, String> {
@@ -1455,6 +1720,7 @@ pub fn run() {
             get_scan_history,
             get_treemap,
             quick_scan,
+            quick_scan_admin,
             get_finding,
             create_plan,
             execute_plan,

@@ -52,7 +52,7 @@ npm run tauri build        # 安装包（目标）
 
 ## 当前状态（2026-10-18）
 
-v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
+v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
 
 已实现：
 
@@ -68,6 +68,8 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 - NTFS MFT 秒扫：UAC helper + `ntfs-reader` 分块读取 `$MFT`、路径重建、目录聚合
 - 重复文件：大小 → 快速哈希 → 完整 BLAKE3、硬链接去重、回收站删除（至少保留一个）
 - 快速扫描优化：release 冷缓存约 5s、热缓存约 2.7s（此前约 30s）
+- 清理执行优化：回收站批量提交、实时进度（文件/字节/失败/当前路径）、永久删除可重建缓存（二次确认）
+- 管理员扫描入口：清理建议页「管理员扫描」（UAC helper 只读实测系统项）、仪表盘「管理员全盘扫描」（MFT）
 - SQLite 持久化：扫描摘要、重复文件结果、扫描历史，重启恢复，保留最近 20 次
 - 数据目录跟随安装盘：D 盘安装使用 `D:\CCDiskSageData\<用户名>`，自动迁移旧 C 盘数据与 WebView2 数据
 - 系统托盘：关闭隐藏到托盘、显示/退出菜单；扫描/清理/重复文件/手动自动清理发送 Windows 通知
@@ -80,7 +82,7 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 
 验证基线：
 
-- `cargo test --workspace` 通过
+- `cargo test --workspace` 通过（67 项，7 项 ignored）
 - `npm run test` / `npm run build` 通过
 - 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
@@ -92,6 +94,8 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 - 管理员 helper 清理（UAC）：Windows Temp/WER/Minidump 删除 233 文件 / 约 160 MiB，3 个占用文件失败；审计 elevation=true
 - DISM Analyze（UAC）：3010 需重启；已修复 DISM 隐藏重启提示卡死（/NoRestart + 15 分钟超时）
 - 快速扫描 release 冷缓存 4.97s / 热缓存 2.72s，结果一致
+- 清理：400 文件回收站批量清理约 1.5s 并有实时进度；永久删除 400 文件即时完成
+- 管理员扫描（UAC）：传递优化 5.1GB/55 文件、Windows 更新缓存 799MB/10,956 文件、Windows Temp 505KB/7 文件实测
 - SQLite 文件数据库跨重启 roundtrip、应用启动建库与表结构验证通过
 - 数据迁移：C 盘 `%LOCALAPPDATA%\cc-disksage`、`%APPDATA%\cc-disksage` 和 WebView2 数据已迁移到 `D:\CCDiskSageData\youda`，扫描/重复结果/审计保留
 - 最终 D 盘安装包覆盖安装后：主程序/helper 含新数据目录逻辑；C 盘旧数据目录未重建

@@ -16,6 +16,9 @@
 
 - 卷枚举与全盘只读扫描（并行 walker，C 盘实测 71 万文件约 60 秒；带实时进度与取消）
 - 快速扫描优化：release 冷缓存约 5 秒、热缓存约 2.7 秒（此前约 30 秒）
+- 清理执行：回收站按批提交（每批 256 个文件），前端实时显示处理文件数、字节、失败数与当前路径
+- 永久删除选项：安全/谨慎且可重建、非管理员的缓存项可勾选「永久删除」（单独开关 + 二次确认），大幅加快大缓存清理
+- 管理员扫描入口：清理建议页「管理员扫描」通过 UAC helper 实测系统项；仪表盘「管理员全盘扫描」通过 MFT 查看系统目录占用
 - NTFS MFT 秒扫：通过 UAC 提权 helper 读取 `$MFT`，分块扫描、路径重建、目录聚合；非 NTFS 自动拒绝并建议普通扫描
 - 重复文件查找：按大小 → 64KB 首尾快速哈希 → 完整 BLAKE3 分组；硬链接去重；默认只扫描文档/下载/图片/视频/桌面
 - 重复文件清理：服务端保存扫描结果，前端只传组/文件 ID；至少保留一个，删除只进回收站，复用计划校验与审计
@@ -59,12 +62,12 @@
 
 ## 安装包
 
-发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0>
+发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1>
 
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
-| `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.1.1-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
+| `dist-installers/cc-disksage-0.1.1-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
@@ -75,13 +78,23 @@ SmartScreen 可能提示。
 安装到 D 盘可使用 NSIS 的 `/D` 参数（必须是最后一个参数）：
 
 ```powershell
-Start-Process .\dist-installers\cc-disksage-0.1.0-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
+Start-Process .\dist-installers\cc-disksage-0.1.1-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
 ```
 
 程序安装在 D 盘时，数据目录自动使用 `D:\CCDiskSageData\<用户名>`；安装在系统盘时使用
 `%LOCALAPPDATA%\cc-disksage`。首次从 C 盘旧位置启动新版时，会复制数据库、日志、规则、
 LLM/自动清理配置和 WebView2 数据到新目录，迁移完成后再删除旧文件；迁移失败则继续使用旧目录。
 API Key 仍在 Windows 凭据管理器中，不随数据目录迁移。
+
+### 清理执行与管理员扫描
+
+- 清理建议页的「管理员扫描」会请求一次 UAC，由 `disksage-helper.exe` 只读扫描
+  Windows Temp、WER、更新缓存、传递优化等管理员规则，并回填实测大小。
+  取消 UAC 会保留普通扫描结果；管理员项在普通扫描中显示「待管理员扫描」。
+- 仪表盘「管理员全盘扫描」通过 NTFS MFT 查看包含系统目录的全盘占用（只读）。
+- 执行清理时进度面板实时显示已处理/总文件数、字节、失败数和当前路径。
+- 回收站删除按批提交；大缓存如需更快，可在确认页勾选「永久删除可重建缓存」，
+  并勾选第二项不可恢复确认。该选项只对安全/谨慎、可重建、非管理员项开放。
 
 ### 自动清理
 
@@ -194,6 +207,8 @@ powershell -File scripts/build-installer.ps1 -Lite -Sign
 - **真实 MFT 提权扫描（UAC）通过**：652,696 文件 / 204,702 目录 / 122.57 GiB / 5.76 秒 / 0 读取错误
 - **walker 对比**：718,862 文件 / 200,196 目录 / 131.52 GiB / 59.6 秒 / 102 权限错误
 - **快速扫描优化**：release 冷缓存 4.97 秒 / 热缓存 2.72 秒，19 个候选项，结果与优化前一致
+- **清理进度与批量删除**：400 个 fixture 文件回收站清理约 1.5 秒，进度面板显示文件数/字节/当前路径；永久删除 400 个文件即时完成
+- **管理员扫描（UAC）**：清理建议页实测传递优化 5.1 GB / 55 文件、Windows 更新缓存 799 MB / 10,956 文件、Windows Temp 505 KB / 7 文件；管理员项显示「管理员实测」
 - **SQLite 持久化**：文件数据库跨重启 roundtrip 通过；实际应用启动创建 `disksage.db`，表 `scans` / `duplicate_scans` 正常
 - MFT 目录聚合、`$WinREAgent` 保留、NTFS 元数据/reparse 跳过、节点上限单测通过；非管理员 helper 拒绝执行
 - 重复文件：真实用户内容目录只读扫描通过；硬链接、大小/阈值、跳过 AppData/腾讯数据、取消等测试通过

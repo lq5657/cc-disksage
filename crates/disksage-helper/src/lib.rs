@@ -12,12 +12,12 @@ use disksage_clean::audit::record_for_item;
 use disksage_clean::{
     AuditLog, CleanError, ExecutionOptions, PlanCandidate, create_plan, execute_plan,
 };
-use disksage_core::{ActionSpec, CleanupResult, EnvMap};
-use disksage_rules::{RulePack, load_builtin_rules, quick_scan};
+use disksage_core::{ActionSpec, CleanupResult, EnvMap, ScanPayload};
+use disksage_rules::{RulePack, load_builtin_rules, quick_scan, quick_scan_elevated};
 #[cfg(windows)]
 use disksage_scan::{CancelToken, MftScanRequest, scan_volume_mft};
 
-use crate::job::HelperJob;
+use crate::job::{HelperJob, scan_payload_path, write_scan_payload};
 #[cfg(windows)]
 use crate::job::{snapshot_path, write_snapshot};
 
@@ -164,6 +164,64 @@ pub fn run_job(job: &HelperJob) -> CleanupResult {
             "helper 执行完成，{} 个文件失败",
             result.failed.len()
         ));
+    }
+
+    result
+}
+
+pub fn run_quick_scan_job(job: &HelperJob, job_path: &Path) -> CleanupResult {
+    let mut result = CleanupResult {
+        job_id: job.job_id.clone(),
+        ..CleanupResult::default()
+    };
+
+    if !actions::is_elevated() {
+        fatal(&mut result, "helper 未以管理员身份运行，拒绝执行");
+        return result;
+    }
+
+    let env: EnvMap = std::env::vars().collect();
+    let all_rules = match load_builtin_rules() {
+        Ok(pack) => pack,
+        Err(error) => {
+            fatal(&mut result, format!("加载内置规则失败：{error}"));
+            return result;
+        }
+    };
+    let schema_version = all_rules.schema_version;
+    let rules = all_rules
+        .rules
+        .into_iter()
+        .filter(|rule| rule.requires_admin)
+        .collect::<Vec<_>>();
+    if rules.is_empty() {
+        fatal(&mut result, "没有需要管理员权限的内置规则");
+        return result;
+    }
+
+    let pack = RulePack {
+        schema_version,
+        rules,
+    };
+    match quick_scan_elevated(&pack, &env, true) {
+        Ok(scan) => {
+            let mut targets = std::collections::HashMap::new();
+            for finding in &scan.findings {
+                targets.insert(finding.id.clone(), finding.targets.clone());
+            }
+            let payload = ScanPayload {
+                findings: scan.findings,
+                matches: scan.matches,
+                targets,
+            };
+            match write_scan_payload(&scan_payload_path(job_path), &payload) {
+                Ok(()) => result
+                    .notes
+                    .push(format!("管理员扫描完成：{} 项", payload.findings.len())),
+                Err(error) => fatal(&mut result, error),
+            }
+        }
+        Err(error) => fatal(&mut result, format!("管理员扫描失败：{error}")),
     }
 
     result

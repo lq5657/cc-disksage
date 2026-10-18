@@ -2,7 +2,7 @@
 
 对应方案：`.claude/plans/disk-cleaner-implementation.md`。
 
-v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
+v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
 （offline 约 212 MB、lite 约 4.9 MB；SHA-256 见 Release 附件与 `dist-installers/SHA256SUMS.txt`）。
 
 ## 已完成
@@ -24,6 +24,8 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 | MFT 秒扫 | `ntfs-reader` 分块读取 `$MFT`、路径/目录聚合、跳过 reparse/系统元数据、UAC helper job、快照回读、仪表盘入口 |
 | 重复文件 | 大小 → 首尾 64KB BLAKE3 → 完整 BLAKE3、多硬链接文件排除、用户内容目录 scope、结果仅内存、回收站删除（至少保留一个）、ID-only IPC |
 | 快速扫描性能 | 单次遍历复用 metadata、缓存红线路径、按目标索引统计、rayon 并行规则；release 冷 4.97s / 热 2.72s |
+| 清理性能/进度 | 回收站 IFileOperation 每批 256 个文件；实时进度（文件/字节/失败/当前路径）；安全可重建项可选永久删除（二次确认） |
+| 管理员扫描 | 清理页「管理员扫描」通过 UAC helper 执行 `quick_scan` job，回填管理员项实测大小；仪表盘「管理员全盘扫描」使用 MFT |
 | SQLite 持久化 | bundled SQLite；保存扫描摘要/重复结果/扫描历史；启动恢复最近结果；保留最近 20 次；`src-tauri/storage.rs` |
 | 数据目录 | 非系统盘安装自动使用 `<盘>:\CCDiskSageData\<用户名>`；Tauri appDirectoriesOverride；旧 C 盘 DB/日志/配置/WebView2 一次性迁移 |
 | 托盘/通知 | 托盘图标、关闭隐藏、显示/退出菜单；扫描/快速扫描/清理/重复文件/手动自动清理完成通知 |
@@ -33,7 +35,7 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（65 项，6 个 ignored）
+- `cargo test --workspace`：通过（67 项，7 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
@@ -50,6 +52,8 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 - **管理员 helper 清理（UAC）**：Windows Temp + 机器级 WER + Minidump，删除 233 个文件 / 约 160 MiB；3 个被占用文件按失败返回，审计 elevation=true
 - **DISM Analyze（UAC，只读）**：退出码 3010（需要重启），组件存储实际 23.44GB、备份/禁用功能 15.30GB、11 个可回收包、建议清理；已修复 DISM 在隐藏重启提示处卡死的问题（`/NoRestart` + 15 分钟超时）
 - 快速扫描优化：release 全规则（含管理员）冷缓存 4.97s、热缓存 2.72s，19 个候选项，大小/文件数与优化前一致
+- 清理进度/批量删除：400 个 fixture 文件回收站清理约 1.5s，进度面板实时更新；永久删除 400 个文件即时完成
+- 管理员扫描（UAC）：helper 只读扫描并写出 payload；传递优化 5.1GB/55 文件、Windows 更新缓存 799MB/10,956 文件、Windows Temp 505KB/7 文件实测回填
 - SQLite：内存与文件数据库 roundtrip、重启读取、扫描历史排序通过；实际应用启动创建 `disksage.db`（`scans`、`duplicate_scans`，user_version=1）
 - 数据目录迁移：D 盘安装启动后，DB/日志/扫描与重复结果/审计/WebView2 数据从 C 迁移到 `D:\CCDiskSageData\youda`，C 旧目录已清空
 - 托盘：关闭主窗口后进程继续运行（隐藏到托盘）；窗口隐藏时快速扫描完成通知与隐藏提示均在最终安装包实测弹出
@@ -78,6 +82,8 @@ v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
 - MFT 扫描只支持 NTFS；跳过 reparse point 与 NTFS 元数据，大小按逻辑文件大小聚合。
 - MFT 对硬链接只计一次，因此总量可能低于 walker；walker 会把同一份硬链接数据按路径重复计数。两种引擎对 `$WinREAgent`/系统目录的取舍也略有不同。
 - 管理员 Temp/WER/Minidump 清理实测 3 个占用文件返回失败；文件动作使用回收站，`freed_bytes` 更接近“已处理字节”，不一定立即反映磁盘可用空间。
+- 回收站删除需要为每个文件创建系统记录，大缓存仍可能较慢；确认页提供「永久删除可重建缓存」快速路径（需二次确认）。
+- 管理员扫描需要一次 UAC，且只扫描内置管理员规则；普通扫描会先完成并保留结果，取消 UAC 不会丢失普通结果。
 - DISM 操作可能返回 3010（需要重启），不会自动重启；超时 15 分钟会终止并提示检查 `dism.log`。
 - treemap 使用逻辑大小；硬链接/稀疏文件的分配大小精确统计属于后续优化。
 - SQLite 只保存扫描摘要（前 3 层目录），不是完整目录树；当前 treemap 下钻深度与之一致。

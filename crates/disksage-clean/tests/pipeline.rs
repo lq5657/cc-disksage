@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use disksage_clean::{AuditLog, ExecutionOptions, PlanCandidate, create_plan, execute_plan};
+use disksage_clean::{
+    AuditLog, ExecutionOptions, PlanCandidate, create_plan, execute_plan,
+    execute_plan_with_progress,
+};
 use disksage_core::{ActionSpec, Recoverability, RiskLevel};
 use disksage_rules::{parse_rule_pack, quick_scan};
 
@@ -126,4 +129,54 @@ fn trash_action_moves_file_to_recycle_bin() {
 
     assert_eq!(result.deleted, 1);
     assert!(!file.exists());
+}
+
+#[test]
+#[ignore = "moves 600 fixture files to the Windows Recycle Bin; run explicitly on Windows"]
+fn trash_batch_moves_many_files_to_recycle_bin() {
+    let temp = tempfile::tempdir().unwrap();
+    let files = (0..600)
+        .map(|index| {
+            let path = temp.path().join(format!("batch-{index:03}.tmp"));
+            std::fs::write(&path, b"batch").unwrap();
+            path
+        })
+        .collect::<Vec<_>>();
+    let env = env_for(temp.path());
+    let candidate = PlanCandidate {
+        finding_id: "finding-batch".into(),
+        rule_id: "user.test_trash_batch".into(),
+        title_zh: "回收站批量测试".into(),
+        risk: RiskLevel::Safe,
+        recoverability: Recoverability::Regenerable,
+        requires_admin: false,
+        action: ActionSpec::Trash,
+        files: files.clone(),
+        allowed_roots: vec![temp.path().to_path_buf()],
+    };
+    let plan = create_plan(vec![candidate], &env).unwrap();
+
+    let mut updates = Vec::new();
+    let mut record = |progress| updates.push(progress);
+    let started = std::time::Instant::now();
+    let result = execute_plan_with_progress(
+        &plan,
+        &env,
+        ExecutionOptions {
+            confirm: true,
+            dry_run: false,
+            elevation: false,
+        },
+        None,
+        Some(&mut record),
+    )
+    .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(result.deleted, 600, "failed: {:?}", result.failed);
+    assert!(files.iter().all(|path| !path.exists()));
+    let last = updates.last().unwrap();
+    assert_eq!(last.phase, "done");
+    assert_eq!(last.processed, 600);
+    println!("batch trash 600 files took {elapsed:?}");
 }

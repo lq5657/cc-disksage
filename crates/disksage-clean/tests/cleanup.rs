@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use disksage_clean::{
     AuditLog, CleanError, ExecutionOptions, PlanCandidate, create_plan, execute_plan,
+    execute_plan_with_progress,
 };
 use disksage_core::{ActionSpec, Recoverability, RiskLevel};
 
@@ -163,6 +164,53 @@ fn dry_run_does_not_delete() {
     assert_eq!(result.deleted, 1);
     assert_eq!(result.freed_bytes, 5);
     assert!(file.exists());
+}
+
+#[test]
+fn reports_progress_for_delete_action() {
+    let temp = tempfile::tempdir().unwrap();
+    let files = ["a.tmp", "b.tmp", "c.tmp"]
+        .iter()
+        .map(|name| {
+            let path = temp.path().join(name);
+            std::fs::write(&path, b"12345").unwrap();
+            path
+        })
+        .collect::<Vec<_>>();
+    let env = env_for(temp.path(), None);
+    let plan = create_plan(
+        vec![candidate(
+            files,
+            vec![temp.path().to_path_buf()],
+            ActionSpec::Delete,
+        )],
+        &env,
+    )
+    .unwrap();
+
+    let mut updates = Vec::new();
+    let mut record = |progress| updates.push(progress);
+    let result = execute_plan_with_progress(
+        &plan,
+        &env,
+        ExecutionOptions {
+            confirm: true,
+            dry_run: false,
+            elevation: false,
+        },
+        None,
+        Some(&mut record),
+    )
+    .unwrap();
+
+    assert_eq!(result.deleted, 3);
+    let last = updates.last().expect("progress callback should run");
+    assert_eq!(last.phase, "done");
+    assert_eq!(last.total, 3);
+    assert_eq!(last.processed, 3);
+    assert_eq!(last.deleted, 3);
+    assert_eq!(last.failed, 0);
+    assert_eq!(last.bytes, 15);
 }
 
 #[test]
