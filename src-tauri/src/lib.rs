@@ -4,17 +4,18 @@ mod storage;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use disksage_clean::{
     AuditLog, ExecutionOptions, PlanCandidate, create_plan as build_plan, execute_plan as run_plan,
 };
 use disksage_core::{
     ActionSpec, CleanupPlan, CleanupResult, DirNode, Finding, GuideId, LlmAssessment, PlanWarning,
-    Recoverability, RiskLevel, ScanSnapshot, VolumeInfo,
+    Recoverability, RiskLevel, ScanSnapshot, VolumeInfo, paths,
 };
 use disksage_llm::{
-    LlmClient, LlmConfig, LlmPreset, PRESETS, RedactContext, build_finding_payload,
-    config::default_config_path, delete_key, get_key, payload_json, set_key,
+    LlmClient, LlmConfig, LlmPreset, PRESETS, RedactContext, build_finding_payload, delete_key,
+    get_key, payload_json, set_key,
 };
 use disksage_rules::{load_builtin_rules, load_user_rules, quick_scan as run_quick_scan};
 use disksage_scan::{
@@ -23,6 +24,7 @@ use disksage_scan::{
 };
 use serde::Serialize;
 use storage::{ScanHistoryEntry, Storage};
+use tauri::Manager;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -201,9 +203,7 @@ struct PlanPreview {
 }
 
 fn user_rules_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .map(|base| base.join("cc-disksage").join("rules"))
+    Some(paths::rules_dir())
 }
 
 #[tauri::command]
@@ -213,6 +213,7 @@ fn get_volumes() -> Vec<VolumeInfo> {
 
 #[tauri::command]
 async fn scan_volume(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     volume: String,
     on_progress: tauri::ipc::Channel<disksage_scan::ScanProgress>,
@@ -260,6 +261,17 @@ async fn scan_volume(
     if let Err(error) = state.storage.save_scan(&summary) {
         eprintln!("failed to persist scan: {error}");
     }
+    notify(
+        &app,
+        "扫描完成",
+        format!(
+            "{}: {} 个文件 / {} / {:.1}s",
+            summary.volume,
+            summary.file_count,
+            format_bytes_short(summary.allocated_bytes),
+            summary.duration_ms as f64 / 1000.0
+        ),
+    );
     Ok(summary)
 }
 
@@ -356,7 +368,10 @@ fn get_latest_duplicate_scan(
 }
 
 #[tauri::command]
-async fn quick_scan(state: tauri::State<'_, AppState>) -> Result<Vec<Finding>, String> {
+async fn quick_scan(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Finding>, String> {
     let result = tauri::async_runtime::spawn_blocking(|| -> Result<_, String> {
         let env: HashMap<String, String> = std::env::vars().collect();
         let mut pack = load_builtin_rules().map_err(|error| error.to_string())?;
@@ -384,6 +399,20 @@ async fn quick_scan(state: tauri::State<'_, AppState>) -> Result<Vec<Finding>, S
         );
     }
 
+    let total_bytes = result
+        .findings
+        .iter()
+        .map(|finding| finding.allocated_bytes)
+        .fold(0u64, u64::saturating_add);
+    notify(
+        &app,
+        "快速扫描完成",
+        format!(
+            "{} 个候选项，共 {}",
+            result.findings.len(),
+            format_bytes_short(total_bytes)
+        ),
+    );
     Ok(result.findings)
 }
 
@@ -476,6 +505,7 @@ async fn create_plan(
 
 #[tauri::command]
 async fn execute_plan(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     plan_id: String,
 ) -> Result<CleanupResult, String> {
@@ -563,6 +593,16 @@ async fn execute_plan(
         }
     }
 
+    notify(
+        &app,
+        "清理完成",
+        format!(
+            "处理 {}，删除 {} 个文件，失败 {}",
+            format_bytes_short(result.freed_bytes),
+            result.deleted,
+            result.failed.len()
+        ),
+    );
     Ok(result)
 }
 
@@ -610,11 +650,7 @@ fn merge_cleanup_result(target: &mut CleanupResult, mut partial: CleanupResult) 
 }
 
 fn jobs_directory() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cc-disksage")
-        .join("jobs")
+    paths::jobs_dir()
 }
 
 fn helper_executable() -> Option<PathBuf> {
@@ -765,6 +801,7 @@ async fn run_mft_scan_job(volume: char) -> Result<ScanSnapshot, String> {
 
 #[tauri::command]
 async fn scan_volume_mft(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     volume: String,
 ) -> Result<ScanSnapshot, String> {
@@ -798,6 +835,17 @@ async fn scan_volume_mft(
     if let Err(error) = state.storage.save_scan(&summary) {
         eprintln!("failed to persist MFT scan: {error}");
     }
+    notify(
+        &app,
+        "MFT 扫描完成",
+        format!(
+            "{}: {} 个文件 / {} / {:.1}s",
+            summary.volume,
+            summary.file_count,
+            format_bytes_short(summary.allocated_bytes),
+            summary.duration_ms as f64 / 1000.0
+        ),
+    );
     Ok(summary)
 }
 
@@ -831,6 +879,7 @@ fn duplicate_roots(scope: &str) -> Result<Vec<PathBuf>, String> {
 
 #[tauri::command]
 async fn find_duplicate_files(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     scope: String,
     min_size: u64,
@@ -875,6 +924,16 @@ async fn find_duplicate_files(
     if let Err(error) = state.storage.save_duplicate_scan(&result) {
         eprintln!("failed to persist duplicate scan: {error}");
     }
+    notify(
+        &app,
+        "重复文件扫描完成",
+        format!(
+            "{} 组，可释放 {}，扫描 {} 个文件",
+            result.groups.len(),
+            format_bytes_short(result.total_wasted_bytes),
+            result.files_scanned
+        ),
+    );
     Ok(result)
 }
 
@@ -893,6 +952,7 @@ fn cancel_duplicate_scan(state: tauri::State<'_, AppState>) -> Result<(), String
 
 #[tauri::command]
 async fn delete_duplicate_files(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     scan_id: String,
     group_id: String,
@@ -994,6 +1054,15 @@ async fn delete_duplicate_files(
     {
         eprintln!("failed to persist updated duplicate scan: {error}");
     }
+    notify(
+        &app,
+        "重复文件已处理",
+        format!(
+            "删除 {} 个文件，失败 {}",
+            result.deleted,
+            result.failed.len()
+        ),
+    );
     Ok(result)
 }
 
@@ -1123,7 +1192,7 @@ fn get_audit_history(limit: usize) -> Result<Vec<serde_json::Value>, String> {
 
 #[tauri::command]
 fn llm_get_config() -> Result<LlmConfigPublic, String> {
-    let config = LlmConfig::load(&default_config_path()).map_err(|error| error.to_string())?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
     let has_key = get_key(&config.provider_id)
         .map_err(|error| error.to_string())?
         .is_some();
@@ -1132,7 +1201,7 @@ fn llm_get_config() -> Result<LlmConfigPublic, String> {
 
 #[tauri::command]
 fn llm_set_config(config: LlmConfig) -> Result<LlmConfigPublic, String> {
-    let path = default_config_path();
+    let path = paths::llm_config_path();
     config.save(&path).map_err(|error| error.to_string())?;
     let has_key = get_key(&config.provider_id)
         .map_err(|error| error.to_string())?
@@ -1152,7 +1221,7 @@ fn llm_clear_key(provider_id: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn llm_test_connection() -> Result<(), String> {
-    let config = LlmConfig::load(&default_config_path()).map_err(|error| error.to_string())?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
     let key = get_key(&config.provider_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "请先在设置中保存 API Key".to_string())?;
@@ -1169,7 +1238,7 @@ fn llm_preview_payload(
     finding_id: String,
 ) -> Result<serde_json::Value, String> {
     let finding = stored_finding(&state, &finding_id)?;
-    let config = LlmConfig::load(&default_config_path()).map_err(|error| error.to_string())?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
     let redact = RedactContext::from_env(config.redact_paths);
     let payload = build_finding_payload(&finding, &config, &redact);
     Ok(payload_json(&payload))
@@ -1181,7 +1250,7 @@ async fn llm_assess_finding(
     finding_id: String,
 ) -> Result<LlmAssessment, String> {
     let finding = stored_finding(&state, &finding_id)?;
-    let config = LlmConfig::load(&default_config_path()).map_err(|error| error.to_string())?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
     let key = get_key(&config.provider_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "请先在设置中保存 API Key".to_string())?;
@@ -1212,7 +1281,7 @@ async fn llm_ask_followup(
         .get(&finding_id)
         .cloned()
         .ok_or_else(|| "请先对该项进行 AI 分析".to_string())?;
-    let config = LlmConfig::load(&default_config_path()).map_err(|error| error.to_string())?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
     let key = get_key(&config.provider_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "请先在设置中保存 API Key".to_string())?;
@@ -1236,14 +1305,116 @@ fn set_auto_clean_config(
 }
 
 #[tauri::command]
-async fn run_auto_clean_now() -> Result<CleanupResult, String> {
-    tauri::async_runtime::spawn_blocking(|| auto_clean::run_auto_clean(true))
+async fn run_auto_clean_now(app: tauri::AppHandle) -> Result<CleanupResult, String> {
+    let result = tauri::async_runtime::spawn_blocking(|| auto_clean::run_auto_clean(true))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())??;
+    notify(
+        &app,
+        "自动清理完成",
+        format!(
+            "处理 {}，删除 {} 个文件，失败 {}",
+            format_bytes_short(result.freed_bytes),
+            result.deleted,
+            result.failed.len()
+        ),
+    );
+    Ok(result)
+}
+
+fn format_bytes_short(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    if bytes == 0 {
+        return "0 B".into();
+    }
+    let mut value = bytes as f64;
+    let mut unit = 0usize;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+fn notify(app: &tauri::AppHandle, title: impl Into<String>, body: impl Into<String>) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(error) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("failed to show notification: {error}");
+    }
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+static TRAY_HINT_SHOWN: AtomicBool = AtomicBool::new(false);
+
+fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItem::with_id(app, "tray_show", "显示主界面", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray_quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or("application icon is missing")?;
+
+    let tray = TrayIconBuilder::with_id("main-tray")
+        .icon(icon)
+        .tooltip("CC DiskSage")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => show_main_window(app),
+            "tray_quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    app.manage(tray);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let window_for_close = window.clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window_for_close.hide();
+                if !TRAY_HINT_SHOWN.swap(true, Ordering::Relaxed) {
+                    notify(
+                        window_for_close.app_handle(),
+                        "CC DiskSage",
+                        "已隐藏到系统托盘。点击托盘图标可恢复，右键可退出。",
+                    );
+                }
+            }
+        });
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let data_root = paths::prepare_data_root();
+
     if std::env::args().any(|argument| argument == "--auto-clean") {
         let exit_code = match auto_clean::run_auto_clean(false) {
             Ok(_) => 0,
@@ -1263,8 +1434,18 @@ pub fn run() {
         }
     };
 
+    let mut context = tauri::generate_context!();
+    context.config_mut().app.app_directories_override = Some(
+        tauri::utils::config::AppDirectoriesOverride::Root(data_root),
+    );
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            setup_tray(app)?;
+            Ok(())
+        })
         .manage(AppState::new(storage))
         .invoke_handler(tauri::generate_handler![
             get_volumes,
@@ -1296,7 +1477,7 @@ pub fn run() {
             delete_duplicate_files,
             open_duplicate_file
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

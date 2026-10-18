@@ -32,12 +32,7 @@ impl AuditLog {
     }
 
     pub fn default_location() -> PathBuf {
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("cc-disksage")
-            .join("logs")
-            .join("audit.jsonl")
+        disksage_core::paths::logs_dir().join("audit.jsonl")
     }
 
     pub fn path(&self) -> &std::path::Path {

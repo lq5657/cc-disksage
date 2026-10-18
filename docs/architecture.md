@@ -26,7 +26,7 @@ src-tauri（Tauri 命令 / AppState）
    PowerShell 的 `Clear-RecycleBin` 系统 API 执行，不可恢复。
 6. **系统引导**：Windows.old/还原点/分页文件规则的 action 为 `Guided`；Tauri 层打开
    `cleanmgr.exe`、`SystemPropertiesProtection.exe` 或 `SystemPropertiesAdvanced.exe`，不直接删除。
-7. **管理员执行**：普通项在主进程执行；管理员项写入 `%LOCALAPPDATA%\cc-disksage\jobs\<job>.json`，
+7. **管理员执行**：普通项在主进程执行；管理员项写入 `<数据目录>\jobs\<job>.json`，
    通过 `Start-Process -Verb RunAs` 启动 `disksage-helper.exe`。helper 校验 nonce/过期时间/规则 ID，
    重新加载编译进二进制的规则并提权扫描，只执行固定 `ActionSpec`；服务名白名单为
    `wuauserv/bits/dosvc`。结果写回 `<job>.result.json`，主进程合并并展示。
@@ -48,10 +48,17 @@ src-tauri（Tauri 命令 / AppState）
 12. **代码签名**：`build-installer.ps1 -Sign` 合并 `tauri.signed.conf.json`，Tauri 的
    `signCommand` 调用 `src-tauri/sign-command.ps1` → `scripts/sign-binary.ps1`，
    用 signtool 签名并验证 helper、主程序与 NSIS 安装包。
-13. **持久化**：`src-tauri/storage.rs` 使用 bundled SQLite，在
-   `%LOCALAPPDATA%\cc-disksage\disksage.db` 保存扫描摘要与重复文件结果。扫描完成、
-   重复扫描完成、重复删除后写入；启动时 `get_latest_scan` / `get_latest_duplicate_scan`
-   恢复最近结果，`get_scan_history` 供历史页展示。每个表保留最近 20 条。
+13. **数据目录**：`disksage-core::paths` 在非系统盘安装时选择
+   `<安装盘>:\CCDiskSageData\<用户名>`，否则使用 `%LOCALAPPDATA%\cc-disksage`。
+   Tauri 启动前通过 `appDirectoriesOverride` 把 WebView2 数据也放到同一目录；首次启动
+   会复制并校验旧 C 盘数据，成功后再清理旧文件。
+14. **持久化**：`src-tauri/storage.rs` 使用 bundled SQLite，在 `<数据目录>\disksage.db`
+   保存扫描摘要与重复文件结果。扫描完成、重复扫描完成、重复删除后写入；启动时
+   `get_latest_scan` / `get_latest_duplicate_scan` 恢复最近结果，`get_scan_history`
+   供历史页展示。每个表保留最近 20 条。
+15. **托盘与通知**：启动时创建托盘图标；关闭窗口隐藏到托盘，托盘菜单显示主界面/退出。
+   扫描、快速扫描、清理、重复文件扫描/删除、手动自动清理完成后通过
+   `tauri-plugin-notification` 发送 Windows 通知。
 
 ## 安全边界
 
@@ -75,5 +82,5 @@ src-tauri（Tauri 命令 / AppState）
 
 ## 后续
 
-SQLite 快照持久化、自动更新、托盘通知。代码签名流水线已就绪，正式发布需要提供证书。
+完整目录树快照持久化、自动更新。代码签名流水线已就绪，正式发布需要提供证书。
 完整方案见 `.claude/plans/disk-cleaner-implementation.md`。

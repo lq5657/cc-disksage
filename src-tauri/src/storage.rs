@@ -35,11 +35,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn default_path() -> PathBuf {
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("cc-disksage")
-            .join("disksage.db")
+        disksage_core::paths::db_path()
     }
 
     pub fn open_default() -> Result<Self, String> {

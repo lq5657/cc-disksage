@@ -1,7 +1,8 @@
 # 规则编写指南
 
 内置规则位于 `rules/builtin/*.toml`，由 `disksage-rules` 在编译时内嵌。
-用户规则位于 `%LOCALAPPDATA%\cc-disksage\rules\*.toml`，只能使用
+用户规则位于数据目录的 `rules\*.toml`（D 盘安装为 `D:\CCDiskSageData\<用户名>\rules\`，
+系统盘安装为 `%LOCALAPPDATA%\cc-disksage\rules\`），只能使用
 `trash` / `delete` / `quarantine`，且不得要求管理员权限、不得默认勾选、
 不得标记为 `danger`。
 

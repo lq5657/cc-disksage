@@ -3,6 +3,7 @@
 pub mod domain;
 pub mod error;
 pub mod path_safety;
+pub mod paths;
 
 pub use domain::*;
 pub use error::{CoreError, Result};

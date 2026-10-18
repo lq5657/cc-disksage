@@ -119,11 +119,7 @@ impl LlmConfig {
 }
 
 pub fn default_config_path() -> PathBuf {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cc-disksage")
-        .join("llm.json")
+    disksage_core::paths::llm_config_path()
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

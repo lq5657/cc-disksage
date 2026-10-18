@@ -31,6 +31,9 @@
 - LLM 设置（OpenAI 兼容 / Ollama `/v1`）、payload 预览与同意、逐项 AI 分析、继续追问
 - 历史记录页（扫描历史 + 本地审计日志）
 - SQLite 持久化：扫描快照、重复文件结果、扫描历史；重启后恢复最近结果（保留最近 20 次）
+- 数据目录跟随安装盘：安装在 D 盘时使用 `D:\CCDiskSageData\<用户名>`，并自动迁移旧 C 盘数据
+- 系统托盘：关闭窗口隐藏到托盘；托盘菜单显示主界面/退出；扫描、清理、重复文件操作发送 Windows 通知
+  （最终安装包已实测窗口隐藏时的快速扫描完成通知）
 - 代码签名流水线：signtool + PFX/证书指纹 + RFC3161 时间戳；Tauri `signCommand` 签名主程序、helper 与安装包
 - NSIS 安装包（offline WebView2 / lite 两种配置）；卸载时移除计划任务
 
@@ -59,13 +62,24 @@
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
 | `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 4.8 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
 
-安装为当前用户（`%LOCALAPPDATA%\CC DiskSage`），不需要管理员。当前未签名，
+默认安装为当前用户（`%LOCALAPPDATA%\CC DiskSage`），不需要管理员。当前未签名，
 SmartScreen 可能提示。
+
+安装到 D 盘可使用 NSIS 的 `/D` 参数（必须是最后一个参数）：
+
+```powershell
+Start-Process .\dist-installers\cc-disksage-0.1.0-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
+```
+
+程序安装在 D 盘时，数据目录自动使用 `D:\CCDiskSageData\<用户名>`；安装在系统盘时使用
+`%LOCALAPPDATA%\cc-disksage`。首次从 C 盘旧位置启动新版时，会复制数据库、日志、规则、
+LLM/自动清理配置和 WebView2 数据到新目录，迁移完成后再删除旧文件；迁移失败则继续使用旧目录。
+API Key 仍在 Windows 凭据管理器中，不随数据目录迁移。
 
 ### 自动清理
 
@@ -78,7 +92,7 @@ SmartScreen 可能提示。
 - 只使用编译进二进制的内置规则，不加载用户自定义规则。
 - 默认删除到回收站；可选「永久删除可重建缓存」，首次启用需勾选二次确认。
   计划任务运行时不会弹窗，永久删除的授权以启用时的确认为准。
-- 每次运行写入 `%LOCALAPPDATA%\cc-disksage\logs\auto-clean.jsonl`，并更新设置页最近运行状态。
+- 每次运行写入 `<数据目录>\logs\auto-clean.jsonl`，并更新设置页最近运行状态。
 - 计划任务只在当前用户登录时运行；卸载安装包时会自动删除该任务。
 
 ### MFT 秒扫
@@ -117,13 +131,32 @@ MFT 总量较低主要是因为硬链接只计一次、跳过 reparse/部分系�
 - 结果最多保留 300 组、每组 50 个文件；硬链接文件（多个名称指向同一份数据）会被排除，
   避免把“同一文件的两个名称”误报为可释放的重复项。
 
-### 本地持久化
+### 本地持久化与托盘
 
-- 数据库：`%LOCALAPPDATA%\cc-disksage\disksage.db`（SQLite WAL）。
-- 保存扫描摘要（目录树前 3 层、Top 大文件）和重复文件分组；不保存文件内容。
-- 保留最近 20 次扫描和 20 次重复扫描；重启后仪表盘恢复最近一次扫描，重复文件页恢复最近一次结果。
-- 历史页展示扫描历史；清理审计仍写入 `audit.jsonl`。
-- 数据库只在本机，不上传；删除数据库即可清空持久化历史。
+数据目录：
+
+- 程序安装在非系统盘（如 `D:\CCDiskSage`）：`D:\CCDiskSageData\<用户名>\`
+- 程序安装在系统盘：`%LOCALAPPDATA%\cc-disksage\`
+- 可用环境变量 `CC_DISKSAGE_DATA_DIR` 覆盖
+
+数据目录包含：
+
+- `disksage.db`：SQLite WAL，保存扫描摘要（目录树前 3 层、Top 大文件）和重复文件分组
+- `logs/`：审计日志 `audit.jsonl`、自动清理日志 `auto-clean.jsonl`
+- `llm.json`、`auto-clean.json`：LLM 与自动清理设置
+- `rules/`、`jobs/`：用户规则和 helper job
+- `EBWebView/`：WebView2 缓存/localStorage
+
+数据只在本机，不上传；保留最近 20 次扫描与 20 次重复扫描。删除数据目录可清空历史和设置
+（API Key 需在设置页单独删除）。
+
+托盘：
+
+- 关闭主窗口不会退出，而是隐藏到系统托盘
+- 左键点击托盘图标或菜单「显示主界面」恢复窗口
+- 右键菜单「退出」完全退出
+- 扫描、快速扫描、清理、重复文件扫描/删除、手动自动清理完成时会发送 Windows 通知
+- 计划任务 `--auto-clean` 无窗口运行，不经过托盘；结果写入自动清理日志
 
 ### 代码签名
 

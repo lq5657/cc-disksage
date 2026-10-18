@@ -65,11 +65,7 @@ pub struct AutoCleanStatus {
 }
 
 pub fn config_path() -> PathBuf {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cc-disksage")
-        .join("auto-clean.json")
+    disksage_core::paths::auto_clean_config_path()
 }
 
 pub fn load_config() -> Result<AutoCleanConfig, String> {
@@ -222,12 +218,7 @@ pub fn is_auto_candidate(finding: &Finding) -> bool {
 }
 
 fn append_log(result: &CleanupResult, status: &str) {
-    let path = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cc-disksage")
-        .join("logs")
-        .join("auto-clean.jsonl");
+    let path = disksage_core::paths::logs_dir().join("auto-clean.jsonl");
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }

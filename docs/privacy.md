@@ -4,16 +4,27 @@ CC DiskSage 默认完全本地运行，无遥测。LLM 是可选功能，默认�
 
 ## 本地数据
 
+数据目录 `<数据目录>`：
+
+- 程序安装在非系统盘（如 D 盘）：`D:\CCDiskSageData\<用户名>`
+- 程序安装在系统盘：`%LOCALAPPDATA%\cc-disksage`
+- 可用 `CC_DISKSAGE_DATA_DIR` 环境变量覆盖
+
 | 数据 | 位置 |
 |---|---|
-| 设置 | `%APPDATA%\cc-disksage\llm.json`（不含 API Key） |
-| 自动清理设置 | `%APPDATA%\cc-disksage\auto-clean.json` |
-| API Key | Windows 凭据管理器，service `cc-disksage.llm` |
-| 审计日志 | `%LOCALAPPDATA%\cc-disksage\logs\audit.jsonl` |
-| 自动清理日志 | `%LOCALAPPDATA%\cc-disksage\logs\auto-clean.jsonl`（仅计数、状态与说明，不含路径） |
-| 持久化数据库 | `%LOCALAPPDATA%\cc-disksage\disksage.db`（最近 20 次扫描摘要、重复文件结果、扫描历史） |
-| 隔离区（未来） | `%LOCALAPPDATA%\cc-disksage\quarantine\` |
-| 用户规则 | `%LOCALAPPDATA%\cc-disksage\rules\*.toml` |
+| LLM 设置 | `<数据目录>\llm.json`（不含 API Key） |
+| 自动清理设置 | `<数据目录>\auto-clean.json` |
+| API Key | Windows 凭据管理器，service `cc-disksage.llm`（不随数据目录迁移） |
+| 审计日志 | `<数据目录>\logs\audit.jsonl` |
+| 自动清理日志 | `<数据目录>\logs\auto-clean.jsonl`（仅计数、状态与说明，不含路径） |
+| 持久化数据库 | `<数据目录>\disksage.db`（最近 20 次扫描摘要、重复文件结果、扫描历史） |
+| 隔离区（未来） | `<数据目录>\quarantine\` |
+| 用户规则 | `<数据目录>\rules\*.toml` |
+| WebView2 数据 | `<数据目录>\EBWebView\` |
+
+旧版 C 盘数据（`%LOCALAPPDATA%\cc-disksage`、`%APPDATA%\cc-disksage` 和
+`%LOCALAPPDATA%\com.ccdisksage.app`）会在首次以 D 盘安装版启动时迁移到新目录；复制并
+校验成功后才删除旧文件，失败则保留旧目录并回退。
 
 SQLite 保存扫描摘要（目录树前 3 层、Top 大文件）和重复文件分组/路径，不保存文件内容、
 注册表值、Cookie 或聊天内容。保留最近 20 次扫描与 20 次重复扫描，可在设置外手动删除

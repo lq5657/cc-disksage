@@ -67,6 +67,8 @@ npm run tauri build        # 安装包（目标）
 - 重复文件：大小 → 快速哈希 → 完整 BLAKE3、硬链接去重、回收站删除（至少保留一个）
 - 快速扫描优化：release 冷缓存约 5s、热缓存约 2.7s（此前约 30s）
 - SQLite 持久化：扫描摘要、重复文件结果、扫描历史，重启恢复，保留最近 20 次
+- 数据目录跟随安装盘：D 盘安装使用 `D:\CCDiskSageData\<用户名>`，自动迁移旧 C 盘数据与 WebView2 数据
+- 系统托盘：关闭隐藏到托盘、显示/退出菜单；扫描/清理/重复文件/手动自动清理发送 Windows 通知
 - 代码签名流水线：signtool + PFX/证书指纹 + 时间戳，Tauri `signCommand` 签 helper/主程序/安装包
 - NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
 
@@ -89,9 +91,12 @@ npm run tauri build        # 安装包（目标）
 - DISM Analyze（UAC）：3010 需重启；已修复 DISM 隐藏重启提示卡死（/NoRestart + 15 分钟超时）
 - 快速扫描 release 冷缓存 4.97s / 热缓存 2.72s，结果一致
 - SQLite 文件数据库跨重启 roundtrip、应用启动建库与表结构验证通过
+- 数据迁移：C 盘 `%LOCALAPPDATA%\cc-disksage`、`%APPDATA%\cc-disksage` 和 WebView2 数据已迁移到 `D:\CCDiskSageData\youda`，扫描/重复结果/审计保留
+- 最终 D 盘安装包覆盖安装后：主程序/helper 含新数据目录逻辑；C 盘旧数据目录未重建
+- 托盘：关闭窗口后进程继续运行；窗口隐藏时快速扫描完成通知正常弹出（含「已隐藏到托盘」提示）
 - 代码签名流水线验证通过，但按当前决定暂不用于发布
 - NSIS 安装包已完成静默安装 → 启动 → 卸载验证；卸载钩子会移除自动清理计划任务
-- 安装包：`dist-installers/`（offline 约 212MB / lite 约 4.8MB）
+- 安装包：`dist-installers/`（offline 约 212MB / lite 约 4.9MB，SHA-256 见 `SHA256SUMS.txt`）
 
 待人工验证：
 

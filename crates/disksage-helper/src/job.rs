@@ -22,11 +22,7 @@ pub struct HelperJob {
 }
 
 pub fn jobs_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("cc-disksage")
-        .join("jobs")
+    disksage_core::paths::jobs_dir()
 }
 
 pub fn result_path(job_path: &Path) -> PathBuf {

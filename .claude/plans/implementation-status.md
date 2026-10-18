@@ -22,13 +22,15 @@
 | 重复文件 | 大小 → 首尾 64KB BLAKE3 → 完整 BLAKE3、多硬链接文件排除、用户内容目录 scope、结果仅内存、回收站删除（至少保留一个）、ID-only IPC |
 | 快速扫描性能 | 单次遍历复用 metadata、缓存红线路径、按目标索引统计、rayon 并行规则；release 冷 4.97s / 热 2.72s |
 | SQLite 持久化 | bundled SQLite；保存扫描摘要/重复结果/扫描历史；启动恢复最近结果；保留最近 20 次；`src-tauri/storage.rs` |
+| 数据目录 | 非系统盘安装自动使用 `<盘>:\CCDiskSageData\<用户名>`；Tauri appDirectoriesOverride；旧 C 盘 DB/日志/配置/WebView2 一次性迁移 |
+| 托盘/通知 | 托盘图标、关闭隐藏、显示/退出菜单；扫描/快速扫描/清理/重复文件/手动自动清理完成通知 |
 | 代码签名 | `sign-binary.ps1`、`sign-installers.ps1`、`tauri.signed.conf.json`、`sign-command.ps1`、PFX/指纹/时间戳、Tauri signCommand 签名 helper/主程序/安装包 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（63 项，6 个 ignored）
+- `cargo test --workspace`：通过（65 项，6 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
@@ -46,6 +48,8 @@
 - **DISM Analyze（UAC，只读）**：退出码 3010（需要重启），组件存储实际 23.44GB、备份/禁用功能 15.30GB、11 个可回收包、建议清理；已修复 DISM 在隐藏重启提示处卡死的问题（`/NoRestart` + 15 分钟超时）
 - 快速扫描优化：release 全规则（含管理员）冷缓存 4.97s、热缓存 2.72s，19 个候选项，大小/文件数与优化前一致
 - SQLite：内存与文件数据库 roundtrip、重启读取、扫描历史排序通过；实际应用启动创建 `disksage.db`（`scans`、`duplicate_scans`，user_version=1）
+- 数据目录迁移：D 盘安装启动后，DB/日志/扫描与重复结果/审计/WebView2 数据从 C 迁移到 `D:\CCDiskSageData\youda`，C 旧目录已清空
+- 托盘：关闭主窗口后进程继续运行（隐藏到托盘）；窗口隐藏时快速扫描完成通知与隐藏提示均在最终安装包实测弹出
 - 代码签名：临时自签名证书 + 临时受信任根完成签名/验签；Tauri `signCommand` 构建 lite 包时成功签名 helper、主程序与安装包，`Get-AuthenticodeSignature` 为 Valid（测试证书已清理）；**按用户决定暂不用于发布**
 - 回收站删除 API：真机通过
 - Windows Credential Manager roundtrip：真机通过
@@ -57,10 +61,9 @@
 
 ## 未完成（下一阶段）
 
-1. 自动清理的真实到点运行与托盘通知（需在 VM 或用户确认后验证，可能删除真实缓存；目前只验证了未启用/阈值跳过）。
-2. 重启后恢复最近扫描/重复结果与历史页扫描列表的 UI 点击流程（存储层已验证）。
-3. 重复文件删除的 Tauri UI 点击流程（核心 fixture 删除已验证，UI 尚未手工点通）。
-3. 系统引导项点击流程（Windows.old/还原点/分页文件/回收站）与干净 Win10 断网安装。
+1. 自动清理的真实到点运行（需在 VM 或用户确认后验证，可能删除真实缓存；目前只验证了未启用/阈值跳过）。
+2. 系统引导项点击流程（Windows.old/还原点/分页文件/回收站）与干净 Win10 断网安装。
+3. 托盘菜单「显示主界面」「退出」的手工点击验证（关闭隐藏与通知已实测）。
 4. 自动更新、per-machine 安装变体、便携版。
 5. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
 6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
@@ -77,8 +80,10 @@
 - SQLite 只保存扫描摘要（前 3 层目录），不是完整目录树；当前 treemap 下钻深度与之一致。
 - SQLite 每个表保留最近 20 条；重复文件结果含本地路径，删除 `disksage.db` 可清空。
 - 重复文件默认只扫描文档/下载/图片/视频/桌面；不扫描 AppData 与应用内部目录，可能漏掉部分重复项。
-- 重复扫描会读取候选文件内容做哈希；结果仅保存在内存，重启后需重新扫描。
+- 重复扫描会读取候选文件内容做哈希；结果保存在 SQLite，重启后恢复最近一次。
 - 自动清理只在计划任务触发时检查低空间阈值，不是常驻监控；任务仅在用户登录时运行。
+- 关闭主窗口只会隐藏到托盘；需通过托盘「退出」或任务管理器结束进程。
+- 系统通知只在 UI 内操作完成时发送；计划任务 `--auto-clean` 无窗口运行，只写日志。
 - 自动清理默认进入回收站；开启永久删除后才会立即释放空间。计划任务被外部移除时，需要在设置页重新保存。
 - 自动清理实际到点运行尚未验证；目前只验证了未启用/阈值跳过和底层 helper 清理。
 - 代码签名按用户决定暂缓；流水线保留，当前发布包未签名。
