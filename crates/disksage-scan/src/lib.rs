@@ -1,9 +1,18 @@
 //! Volume and filesystem scanning.
 
+pub mod duplicates;
+#[cfg(windows)]
+pub mod mft;
 pub mod volumes;
 pub mod walker;
 
 pub use disksage_core as core;
+pub use duplicates::{
+    DuplicateFile, DuplicateGroup, DuplicateRequest, DuplicateScanProgress, DuplicateScanResult,
+    find_duplicates,
+};
+#[cfg(windows)]
+pub use mft::{MftScanRequest, scan_volume_mft};
 pub use volumes::enumerate_volumes;
 pub use walker::{CancelToken, ScanError, ScanProgress, ScanRequest, scan_volume};
 

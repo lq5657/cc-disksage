@@ -16,7 +16,10 @@ use disksage_llm::{
     config::default_config_path, delete_key, get_key, payload_json, set_key,
 };
 use disksage_rules::{load_builtin_rules, load_user_rules, quick_scan as run_quick_scan};
-use disksage_scan::{CancelToken, ScanRequest, scan_volume as run_scan};
+use disksage_scan::{
+    CancelToken, DuplicateRequest, DuplicateScanProgress, DuplicateScanResult, ScanRequest,
+    find_duplicates, scan_volume as run_scan,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -34,6 +37,8 @@ struct AppState {
     assessments: Mutex<HashMap<String, LlmAssessment>>,
     snapshots: Mutex<HashMap<String, ScanSnapshot>>,
     scan_cancel: Mutex<Option<CancelToken>>,
+    duplicate_scans: Mutex<HashMap<String, DuplicateScanResult>>,
+    duplicate_cancel: Mutex<Option<CancelToken>>,
 }
 
 #[derive(Serialize)]
@@ -583,6 +588,8 @@ struct HelperJobFile {
     nonce: String,
     expires_at: i64,
     rule_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    volume: Option<String>,
 }
 
 async fn run_admin_job(rule_ids: Vec<String>) -> Result<CleanupResult, String> {
@@ -602,6 +609,7 @@ async fn run_admin_job(rule_ids: Vec<String>) -> Result<CleanupResult, String> {
         nonce: Uuid::new_v4().to_string(),
         expires_at: chrono::Utc::now().timestamp() + 600,
         rule_ids,
+        volume: None,
     };
     let text = serde_json::to_string_pretty(&job).map_err(|error| error.to_string())?;
     std::fs::write(&job_path, text).map_err(|error| error.to_string())?;
@@ -628,6 +636,322 @@ async fn run_admin_job(rule_ids: Vec<String>) -> Result<CleanupResult, String> {
         result.notes.push(format!("helper 启动提示：{error}"));
     }
     Ok(result)
+}
+
+async fn run_mft_scan_job(volume: char) -> Result<ScanSnapshot, String> {
+    let helper = helper_executable()
+        .ok_or_else(|| "未找到 disksage-helper.exe（请重新安装或构建 helper）".to_string())?;
+    let jobs = jobs_directory();
+    std::fs::create_dir_all(&jobs).map_err(|error| error.to_string())?;
+
+    let job_id = Uuid::new_v4().to_string();
+    let job_path = jobs.join(format!("{job_id}.json"));
+    let result_path = job_path.with_extension("result.json");
+    let snapshot_path = job_path.with_extension("snapshot.json");
+    let _ = std::fs::remove_file(&result_path);
+    let _ = std::fs::remove_file(&snapshot_path);
+
+    let job = HelperJobFile {
+        task: "mft_scan".into(),
+        job_id: job_id.clone(),
+        nonce: Uuid::new_v4().to_string(),
+        expires_at: chrono::Utc::now().timestamp() + 600,
+        rule_ids: Vec::new(),
+        volume: Some(volume.to_ascii_uppercase().to_string()),
+    };
+    let text = serde_json::to_string_pretty(&job).map_err(|error| error.to_string())?;
+    std::fs::write(&job_path, text).map_err(|error| error.to_string())?;
+
+    let helper_for_launch = helper.clone();
+    let job_for_launch = job_path.clone();
+    let launch = tauri::async_runtime::spawn_blocking(move || {
+        launch_elevated_helper(&helper_for_launch, &job_for_launch)
+    })
+    .await
+    .map_err(|error| format!("helper launch task failed: {error}"))?;
+
+    if !result_path.exists() {
+        return Err(match launch {
+            Ok(()) => "提权 helper 未产生 MFT 扫描结果".into(),
+            Err(error) => error,
+        });
+    }
+
+    let text = std::fs::read_to_string(&result_path).map_err(|error| error.to_string())?;
+    let result: CleanupResult =
+        serde_json::from_str(&text).map_err(|error| format!("无效的 helper 结果：{error}"))?;
+    if !result.failed.is_empty() {
+        return Err(result
+            .notes
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "MFT 提权扫描失败".into()));
+    }
+    if !snapshot_path.exists() {
+        return Err("helper 未写出 MFT 快照".into());
+    }
+    let text = std::fs::read_to_string(&snapshot_path).map_err(|error| error.to_string())?;
+    let snapshot: ScanSnapshot =
+        serde_json::from_str(&text).map_err(|error| format!("无效的 MFT 快照：{error}"))?;
+    let _ = std::fs::remove_file(&job_path);
+    let _ = std::fs::remove_file(&result_path);
+    let _ = std::fs::remove_file(&snapshot_path);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn scan_volume_mft(
+    state: tauri::State<'_, AppState>,
+    volume: String,
+) -> Result<ScanSnapshot, String> {
+    let letter = volume.trim().trim_end_matches(':').to_ascii_uppercase();
+    if letter.len() != 1
+        || !letter
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return Err("invalid volume letter".to_string());
+    }
+    let letter = letter.chars().next().unwrap_or('C');
+    let info = disksage_scan::enumerate_volumes()
+        .into_iter()
+        .find(|info| info.letter == letter)
+        .ok_or_else(|| format!("未找到 {letter}: 盘"))?;
+    if !info.filesystem.eq_ignore_ascii_case("NTFS") {
+        return Err(format!(
+            "{}: 盘的文件系统是 {}，MFT 秒扫仅支持 NTFS；请使用普通扫描。",
+            letter, info.filesystem
+        ));
+    }
+
+    let snapshot = run_mft_scan_job(letter).await?;
+    let summary = prune_snapshot(&snapshot);
+    state
+        .snapshots
+        .lock()
+        .map_err(|_| "snapshot store lock poisoned".to_string())?
+        .insert(snapshot.id.clone(), snapshot);
+    Ok(summary)
+}
+
+fn duplicate_roots(scope: &str) -> Result<Vec<PathBuf>, String> {
+    let candidates: Vec<Option<PathBuf>> = match scope {
+        "user" => vec![
+            dirs::document_dir(),
+            dirs::download_dir(),
+            dirs::picture_dir(),
+            dirs::video_dir(),
+            dirs::desktop_dir(),
+        ],
+        "downloads" => vec![dirs::download_dir()],
+        "documents" => vec![dirs::document_dir()],
+        "pictures" => vec![dirs::picture_dir()],
+        "videos" => vec![dirs::video_dir()],
+        "desktop" => vec![dirs::desktop_dir()],
+        _ => return Err("invalid duplicate scan scope".into()),
+    };
+    let mut roots = Vec::new();
+    for root in candidates.into_iter().flatten() {
+        if root.is_dir() && !roots.iter().any(|existing| existing == &root) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        return Err("所选目录不存在或无法访问".into());
+    }
+    Ok(roots)
+}
+
+#[tauri::command]
+async fn find_duplicate_files(
+    state: tauri::State<'_, AppState>,
+    scope: String,
+    min_size: u64,
+    on_progress: tauri::ipc::Channel<DuplicateScanProgress>,
+) -> Result<DuplicateScanResult, String> {
+    let roots = duplicate_roots(&scope)?;
+    let min_size = min_size.clamp(4 * 1024, 10 * 1024 * 1024 * 1024);
+    let mut request = DuplicateRequest::new(roots);
+    request.min_size = min_size;
+
+    let cancel = CancelToken::new();
+    *state
+        .duplicate_cancel
+        .lock()
+        .map_err(|_| "duplicate cancel lock poisoned".to_string())? = Some(cancel.clone());
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        find_duplicates(
+            request,
+            move |progress| {
+                let _ = on_progress.send(progress);
+            },
+            cancel,
+        )
+    })
+    .await
+    .map_err(|error| format!("duplicate scan task failed: {error}"));
+
+    if let Ok(mut guard) = state.duplicate_cancel.lock() {
+        *guard = None;
+    }
+    let result = result?.map_err(|error| error.to_string())?;
+
+    let mut store = state
+        .duplicate_scans
+        .lock()
+        .map_err(|_| "duplicate store lock poisoned".to_string())?;
+    store.clear();
+    store.insert(result.scan_id.clone(), result.clone());
+    Ok(result)
+}
+
+#[tauri::command]
+fn cancel_duplicate_scan(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Some(token) = state
+        .duplicate_cancel
+        .lock()
+        .map_err(|_| "duplicate cancel lock poisoned".to_string())?
+        .as_ref()
+    {
+        token.cancel();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_duplicate_files(
+    state: tauri::State<'_, AppState>,
+    scan_id: String,
+    group_id: String,
+    keep_file_id: String,
+    delete_file_ids: Vec<String>,
+) -> Result<CleanupResult, String> {
+    if delete_file_ids.is_empty() {
+        return Err("请选择要删除的重复文件".into());
+    }
+    if delete_file_ids.len() > 100 {
+        return Err("单次最多删除 100 个文件".into());
+    }
+    let unique = delete_file_ids
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
+    if unique.len() != delete_file_ids.len() || delete_file_ids.contains(&keep_file_id) {
+        return Err("删除列表无效".into());
+    }
+
+    let (roots, selected_paths) = {
+        let store = state
+            .duplicate_scans
+            .lock()
+            .map_err(|_| "duplicate store lock poisoned".to_string())?;
+        let scan = store
+            .get(&scan_id)
+            .ok_or_else(|| "重复扫描结果已失效，请重新扫描".to_string())?;
+        let group = scan
+            .groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| "重复文件组已失效，请重新扫描".to_string())?;
+        if !group.files.iter().any(|file| file.id == keep_file_id) {
+            return Err("保留文件不在该组中".into());
+        }
+        let mut paths = Vec::new();
+        for file_id in &delete_file_ids {
+            let file = group
+                .files
+                .iter()
+                .find(|file| file.id == *file_id)
+                .ok_or_else(|| "删除文件不在该组中".to_string())?;
+            let metadata = std::fs::metadata(&file.path)
+                .map_err(|error| format!("无法读取 {}：{error}", file.path.display()))?;
+            if metadata.len() != group.size {
+                return Err(format!(
+                    "{} 在扫描后已变化，请重新扫描后再删除",
+                    file.path.display()
+                ));
+            }
+            paths.push(file.path.clone());
+        }
+        (scan.roots.clone(), paths)
+    };
+
+    let env: HashMap<String, String> = std::env::vars().collect();
+    let candidate = PlanCandidate {
+        finding_id: group_id.clone(),
+        rule_id: "duplicates.user_selected".into(),
+        title_zh: "重复文件（用户选择）".into(),
+        risk: RiskLevel::Caution,
+        recoverability: Recoverability::RecycleBin,
+        requires_admin: false,
+        action: ActionSpec::Trash,
+        files: selected_paths,
+        allowed_roots: roots,
+    };
+    let plan_input = vec![candidate];
+    let plan_env = env.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let plan = build_plan(plan_input, &plan_env).map_err(|error| error.to_string())?;
+        let audit = AuditLog::new(AuditLog::default_location());
+        run_plan(
+            &plan,
+            &plan_env,
+            ExecutionOptions {
+                confirm: true,
+                dry_run: false,
+                elevation: false,
+            },
+            Some(&audit),
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("duplicate delete task failed: {error}"))??;
+
+    let mut store = state
+        .duplicate_scans
+        .lock()
+        .map_err(|_| "duplicate store lock poisoned".to_string())?;
+    if let Some(scan) = store.get_mut(&scan_id) {
+        scan.groups.retain(|group| group.id != group_id);
+        scan.total_wasted_bytes = scan
+            .groups
+            .iter()
+            .map(|group| group.wasted_bytes)
+            .fold(0, u64::saturating_add);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+fn open_duplicate_file(
+    state: tauri::State<'_, AppState>,
+    scan_id: String,
+    file_id: String,
+) -> Result<(), String> {
+    let path = {
+        let store = state
+            .duplicate_scans
+            .lock()
+            .map_err(|_| "duplicate store lock poisoned".to_string())?;
+        let scan = store
+            .get(&scan_id)
+            .ok_or_else(|| "重复扫描结果已失效，请重新扫描".to_string())?;
+        scan.groups
+            .iter()
+            .flat_map(|group| group.files.iter())
+            .find(|file| file.id == file_id)
+            .map(|file| file.path.clone())
+            .ok_or_else(|| "文件已不在扫描结果中".to_string())?
+    };
+    let windows = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    std::process::Command::new(windows.join("explorer.exe"))
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
@@ -862,7 +1186,12 @@ pub fn run() {
             llm_ask_followup,
             get_auto_clean_status,
             set_auto_clean_config,
-            run_auto_clean_now
+            run_auto_clean_now,
+            scan_volume_mft,
+            find_duplicate_files,
+            cancel_duplicate_scan,
+            delete_duplicate_files,
+            open_duplicate_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -545,6 +545,7 @@ name = "cc-disksage"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs 6.0.0",
  "disksage-clean",
  "disksage-core",
  "disksage-llm",
@@ -1016,6 +1017,15 @@ dependencies = [
 
 [[package]]
 name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
@@ -1119,7 +1129,9 @@ dependencies = [
 name = "disksage-scan"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "disksage-core",
+ "ntfs-reader",
  "rayon",
  "serde",
  "serde_json",
@@ -1128,6 +1140,8 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "uuid",
+ "walkdir",
+ "windows",
 ]
 
 [[package]]
@@ -2728,6 +2742,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "ntfs-reader"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb34a1cf0c0b3156733287e619769b4c82a03a53497594217ab66cc68d483404"
+dependencies = [
+ "thiserror 2.0.21",
+ "time",
+ "tracing",
+ "windows",
 ]
 
 [[package]]
@@ -4441,7 +4467,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cookie",
- "dirs",
+ "dirs 7.0.0",
  "dunce",
  "embed_plist",
  "getrandom 0.3.4",
@@ -4491,7 +4517,7 @@ checksum = "641dd5fd297c99ab92717b0428cca5b9c6f960b2ac96ca131b3eebc9d70b8ddc"
 dependencies = [
  "anyhow",
  "cargo_toml",
- "dirs",
+ "dirs 7.0.0",
  "glob",
  "heck 0.5.0",
  "json-patch",
@@ -5079,7 +5105,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2b9c52859a94554803ccd4a24b98f74148ebc73b90676d783f3490b1bff9d72"
 dependencies = [
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "libappindicator",
  "muda",
  "objc2",
@@ -5861,7 +5887,7 @@ dependencies = [
  "block2",
  "cookie",
  "crossbeam-channel",
- "dirs",
+ "dirs 7.0.0",
  "dom_query",
  "dpi",
  "dunce",

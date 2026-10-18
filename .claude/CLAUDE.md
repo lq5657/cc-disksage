@@ -39,6 +39,7 @@ cargo clippy -- -D warnings
 npm run test               # 前端测试
 npm run build              # 前端构建
 npm run build:helper:release  # 构建并复制提权 helper
+npm run sign:installers    # 签名 dist-installers（需证书环境变量）
 npm run tauri build        # 安装包（目标）
 ```
 
@@ -62,12 +63,14 @@ npm run tauri build        # 安装包（目标）
   Windows Update 缓存/DISM Analyze+StartComponentCleanup/休眠文件
 - 系统引导（Windows.old/还原点/分页文件）与回收站清空
 - 定时/低空间自动清理：`--auto-clean` 无窗口模式、Task Scheduler、安全规则过滤、设置页、独立日志
+- NTFS MFT 秒扫：UAC helper + `ntfs-reader` 分块读取 `$MFT`、路径重建、目录聚合
+- 重复文件：大小 → 快速哈希 → 完整 BLAKE3、硬链接去重、回收站删除（至少保留一个）
+- 代码签名流水线：signtool + PFX/证书指纹 + 时间戳，Tauri `signCommand` 签 helper/主程序/安装包
 - NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
 
 未实现：
 
-- MFT 秒扫、重复文件、代码签名/自动更新
-- SQLite 快照持久化（当前快照在进程内存）
+- 自动更新、SQLite 快照持久化（当前快照在进程内存）
 
 验证基线：
 
@@ -76,5 +79,13 @@ npm run tauri build        # 安装包（目标）
 - 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
 - 计划任务非管理员创建/查询/删除（含空格路径）、`--auto-clean` 未启用/阈值跳过路径已在真机验证
+- MFT 聚合/路径/跳过规则单测通过；非管理员 helper 拒绝 MFT 任务
+- 重复文件真实内容目录只读扫描通过；硬链接、阈值、跳过 AppData/腾讯数据、取消测试通过
+- 代码签名：自签名证书验证 signtool 与 Tauri `signCommand`（helper/主程序/安装包）
 - NSIS 安装包已完成静默安装 → 启动 → 卸载验证；卸载钩子会移除自动清理计划任务
-- 安装包：`dist-installers/`（offline 约 211MB / lite 约 3.8MB）
+- 安装包：`dist-installers/`（offline 约 211MB / lite 约 3.9MB）
+
+待人工验证：
+
+- 真实 MFT 提权扫描（需要 UAC）
+- 正式发布签名（需要受信任证书）

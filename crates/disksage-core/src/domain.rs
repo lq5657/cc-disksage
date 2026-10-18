@@ -19,6 +19,9 @@ pub struct VolumeInfo {
 pub struct ScanSnapshot {
     pub id: String,
     pub volume: char,
+    /// Scan engine: `walker` (directory traversal) or `mft` (NTFS MFT).
+    #[serde(default)]
+    pub engine: String,
     pub started_at: Timestamp,
     pub duration_ms: u64,
     pub total_bytes: u64,

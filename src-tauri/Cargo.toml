@@ -27,6 +27,7 @@ disksage-scan = { path = "../crates/disksage-scan" }
 disksage-rules = { path = "../crates/disksage-rules" }
 disksage-clean = { path = "../crates/disksage-clean" }
 disksage-llm = { path = "../crates/disksage-llm" }
+dirs = "6"
 uuid.workspace = true
 chrono.workspace = true
 

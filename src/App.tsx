@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BarChart3,
   ChevronRight,
+  Copy,
   FileArchive,
   Gauge,
   HardDrive,
@@ -12,22 +13,31 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import {
   cancelScan,
   getVolumes,
   scanVolume,
+  scanVolumeMft,
   type ScanProgress,
   type ScanSnapshot,
   type VolumeInfo,
 } from "./lib/api";
 import { formatBytes, formatPercent } from "./lib/format";
 import CleanupPage from "./pages/CleanupPage";
+import DuplicatesPage from "./pages/DuplicatesPage";
 import ExplorePage from "./pages/ExplorePage";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 
-type PageId = "dashboard" | "explore" | "cleanup" | "history" | "settings";
+type PageId =
+  | "dashboard"
+  | "explore"
+  | "cleanup"
+  | "duplicates"
+  | "history"
+  | "settings";
 
 const NAV: Array<{
   id: PageId;
@@ -37,6 +47,7 @@ const NAV: Array<{
   { id: "dashboard", label: "仪表盘", icon: Gauge },
   { id: "explore", label: "空间分析", icon: BarChart3 },
   { id: "cleanup", label: "清理建议", icon: Sparkles },
+  { id: "duplicates", label: "重复文件", icon: Copy },
   { id: "history", label: "历史记录", icon: History },
   { id: "settings", label: "设置", icon: Settings },
 ];
@@ -102,7 +113,7 @@ function TopDirs({ snapshot }: { snapshot: ScanSnapshot }) {
         <div>
           <h3 className="font-semibold">空间占用 Top 目录</h3>
           <p className="text-xs text-emerald-900/50 dark:text-emerald-100/50">
-            来自本次全盘扫描；treemap 将在后续里程碑接入
+            来自本次扫描（目录遍历或 MFT）；可在「空间分析」中查看 treemap
           </p>
         </div>
         <BarChart3 className="h-5 w-5 text-emerald-700/60 dark:text-emerald-300/60" />
@@ -180,17 +191,21 @@ function Dashboard({
   volume,
   snapshot,
   scanning,
+  mftScanning,
   progress,
   error,
   onScan,
+  onMftScan,
   onCancel,
 }: {
   volume: VolumeInfo;
   snapshot: ScanSnapshot | null;
   scanning: boolean;
+  mftScanning: boolean;
   progress: ScanProgress | null;
   error: string | null;
   onScan: () => void;
+  onMftScan: () => void;
   onCancel: () => void;
 }) {
   const displayVolume = snapshot
@@ -219,25 +234,49 @@ function Dashboard({
               </p>
               <p className="mt-3 max-w-md text-sm text-emerald-900/70 dark:text-emerald-100/70">
                 {snapshot
-                  ? `扫描完成：${snapshot.file_count.toLocaleString()} 个文件，${snapshot.dir_count.toLocaleString()} 个目录，用时 ${(snapshot.duration_ms / 1000).toFixed(1)} 秒。`
+                  ? `扫描完成（${snapshot.engine === "mft" ? "MFT 秒扫" : "目录遍历"}）：${snapshot.file_count.toLocaleString()} 个文件，${snapshot.dir_count.toLocaleString()} 个目录，用时 ${(snapshot.duration_ms / 1000).toFixed(1)} 秒。`
                   : "先做一次只读扫描，查看目录占用与大文件，再决定清理哪些项目。"}
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onScan}
-            disabled={scanning}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
-          >
-            {scanning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ScanLine className="h-4 w-4" />
-            )}
-            {scanning ? "扫描中…" : `扫描 ${volume.letter} 盘`}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onScan}
+              disabled={scanning || mftScanning}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:bg-emerald-400"
+            >
+              {scanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ScanLine className="h-4 w-4" />
+              )}
+              {scanning ? "扫描中…" : `扫描 ${volume.letter} 盘`}
+            </button>
+            <button
+              type="button"
+              onClick={onMftScan}
+              disabled={scanning || mftScanning}
+              title="需要管理员权限（UAC）。仅支持 NTFS，通常数秒完成。"
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-700/30 px-4 py-2.5 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-300/30 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+            >
+              {mftScanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+              {mftScanning ? "读取 MFT…" : "MFT 秒扫"}
+            </button>
+          </div>
         </div>
+
+        {mftScanning ? (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/50 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+            正在请求管理员权限并通过 disksage-helper 读取 NTFS MFT（只读）。
+            如果取消 UAC，本次扫描会终止；普通扫描仍可继续使用。
+          </div>
+        ) : null}
 
         {scanning ? (
           <div className="mt-4 rounded-xl border border-emerald-700/20 bg-emerald-50/70 p-3 dark:border-emerald-300/20 dark:bg-emerald-500/10">
@@ -362,7 +401,7 @@ function ActionCard({
         {description}
       </p>
       <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-emerald-700 dark:text-emerald-300">
-        即将可用 <ChevronRight className="h-4 w-4" />
+        使用左侧导航 <ChevronRight className="h-4 w-4" />
       </div>
     </section>
   );
@@ -374,6 +413,7 @@ export default function App() {
   const [selected, setSelected] = useState("C");
   const [snapshot, setSnapshot] = useState<ScanSnapshot | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [mftScanning, setMftScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -421,6 +461,24 @@ export default function App() {
     } finally {
       setScanning(false);
       setScanProgress(null);
+    }
+  }
+
+  async function handleMftScan() {
+    setMftScanning(true);
+    setError(null);
+    try {
+      const result = await scanVolumeMft(selectionLetter());
+      setSnapshot(result);
+    } catch (scanError) {
+      const message = String(scanError);
+      setError(
+        message.toLowerCase().includes("cancel") || message.includes("取消")
+          ? "MFT 扫描已取消或未获得管理员授权。"
+          : message,
+      );
+    } finally {
+      setMftScanning(false);
     }
   }
 
@@ -520,13 +578,17 @@ export default function App() {
               volume={volume}
               snapshot={snapshot}
               scanning={scanning}
+              mftScanning={mftScanning}
               progress={scanProgress}
               error={error}
               onScan={handleScan}
+              onMftScan={handleMftScan}
               onCancel={handleCancelScan}
             />
           ) : active === "cleanup" ? (
             <CleanupPage />
+          ) : active === "duplicates" ? (
+            <DuplicatesPage />
           ) : active === "explore" ? (
             <ExplorePage
               snapshot={snapshot}

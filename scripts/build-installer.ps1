@@ -1,5 +1,6 @@
 param(
-    [switch]$Lite
+    [switch]$Lite,
+    [switch]$Sign
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,18 +16,28 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "npm not found. Install Node.js first."
 }
+if ($Sign -and -not $env:CC_DISKSAGE_SIGN_PFX -and -not $env:CC_DISKSAGE_SIGN_THUMBPRINT) {
+    throw "Sign requested but no certificate configured. Set CC_DISKSAGE_SIGN_PFX (+ password) or CC_DISKSAGE_SIGN_THUMBPRINT."
+}
 
 $version = (Get-Content (Join-Path $root "package.json") | ConvertFrom-Json).version
 $suffix = if ($Lite) { "lite" } else { "offline" }
 
-Write-Host "Building CC DiskSage $version ($suffix)..."
+Write-Host "Building CC DiskSage $version ($suffix, signed=$Sign)..."
 npm install
 npm run build:helper:release
+
+$buildArgs = @("run", "tauri", "--", "build")
 if ($Lite) {
     Write-Host "Lite build expects WebView2 to already be installed on the target machine."
-    npm run tauri build -- --config src-tauri/tauri.lite.conf.json
-} else {
-    npm run tauri build
+    $buildArgs += @("--config", "src-tauri/tauri.lite.conf.json")
+}
+if ($Sign) {
+    $buildArgs += @("--config", "src-tauri/tauri.signed.conf.json")
+}
+& npm @buildArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "tauri build failed with exit code $LASTEXITCODE"
 }
 
 $bundle = Join-Path $root "target\release\bundle\nsis"

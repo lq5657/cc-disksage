@@ -9,6 +9,8 @@
 - [ ] `npm run build`
 - [ ] `cargo test -p disksage-clean --test pipeline trash_action_moves_file_to_recycle_bin -- --ignored`（Windows 真机）
 - [ ] `cargo test -p cc-disksage scheduled_task_roundtrip_with_spaced_path -- --ignored`（创建/查询/删除真实计划任务，含空格路径）
+- [ ] `cargo test -p disksage-scan scans_real_user_profile_read_only -- --ignored`（只读真实重复扫描）
+- [ ] `powershell -File scripts/build-installer.ps1 -Lite -Sign`（需证书，验证签名流水线）
 - [ ] `cargo run -p disksage-rules --example quick_scan`（只读，核对真实 C 盘）
 - [ ] `cargo run --release -p disksage-scan --example scan_c`（只读，性能基线）
 
@@ -35,6 +37,12 @@
 - [ ] 剩余空间高于阈值时计划运行跳过；低于阈值时执行并写 `auto-clean.jsonl`
 - [ ] 自动清理默认进回收站；永久删除开关首次启用有二次确认
 - [ ] 卸载后计划任务 `CC DiskSage Auto Clean` 被移除
+- [ ] MFT 秒扫触发 UAC；helper 只读扫描；结果与普通扫描文件数/大小对比合理；treemap 可下钻
+- [ ] 非 NTFS 卷点击 MFT 秒扫被拒绝并提示使用普通扫描；UAC 取消不影响普通扫描
+- [ ] 重复文件扫描只覆盖用户内容目录；AppData/Tencent/node_modules 不出现
+- [ ] 重复文件至少保留一个才能删除；删除进回收站可恢复；路径/大小变化后拒绝删除
+- [ ] 重复文件删除后前端只传 ID；审计日志包含 duplicate 删除记录
+- [ ] 签名安装包 `signtool verify /pa` / `Get-AuthenticodeSignature` 为 Valid；安装后的主程序与 helper 也有有效签名
 - [ ] 审计日志与历史页记录正确
 - [ ] LLM：payload 预览 → 同意 → 分析；无 Key/断网时回退
 - [ ] LLM 输出含数字/未知证据 ID 时被拒绝

@@ -92,6 +92,7 @@ export interface Finding {
 export interface ScanSnapshot {
   id: string;
   volume: string;
+  engine: string;
   started_at: number;
   duration_ms: number;
   total_bytes: number;
@@ -129,6 +130,89 @@ export async function scanVolume(
 
 export async function cancelScan(): Promise<void> {
   return invoke("cancel_scan");
+}
+
+export async function scanVolumeMft(volume: string): Promise<ScanSnapshot> {
+  return invoke<ScanSnapshot>("scan_volume_mft", { volume });
+}
+
+export interface DuplicateScanProgress {
+  phase: string;
+  files_seen: number;
+  candidate_files: number;
+  hashed_files: number;
+  groups_found: number;
+  bytes_hashed: number;
+  elapsed_ms: number;
+  current: string;
+}
+
+export interface DuplicateFile {
+  id: string;
+  path: string;
+  modified_at: number | null;
+  allocated_bytes: number;
+}
+
+export interface DuplicateGroup {
+  id: string;
+  size: number;
+  hash: string;
+  files: DuplicateFile[];
+  wasted_bytes: number;
+}
+
+export interface DuplicateScanResult {
+  scan_id: string;
+  roots: string[];
+  groups: DuplicateGroup[];
+  total_wasted_bytes: number;
+  files_scanned: number;
+  candidate_files: number;
+  hashed_files: number;
+  error_count: number;
+  duration_ms: number;
+  truncated: boolean;
+  min_size: number;
+}
+
+export async function findDuplicateFiles(
+  scope: string,
+  minSize: number,
+  onProgress?: (progress: DuplicateScanProgress) => void,
+): Promise<DuplicateScanResult> {
+  const channel = new Channel<DuplicateScanProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return invoke<DuplicateScanResult>("find_duplicate_files", {
+    scope,
+    minSize,
+    onProgress: channel,
+  });
+}
+
+export async function cancelDuplicateScan(): Promise<void> {
+  return invoke("cancel_duplicate_scan");
+}
+
+export async function deleteDuplicateFiles(
+  scanId: string,
+  groupId: string,
+  keepFileId: string,
+  deleteFileIds: string[],
+): Promise<CleanupResult> {
+  return invoke<CleanupResult>("delete_duplicate_files", {
+    scanId,
+    groupId,
+    keepFileId,
+    deleteFileIds,
+  });
+}
+
+export async function openDuplicateFile(
+  scanId: string,
+  fileId: string,
+): Promise<void> {
+  return invoke("open_duplicate_file", { scanId, fileId });
 }
 
 export async function quickScan(): Promise<Finding[]> {

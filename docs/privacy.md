@@ -14,7 +14,9 @@ CC DiskSage 默认完全本地运行，无遥测。LLM 是可选功能，默认�
 | 隔离区（未来） | `%LOCALAPPDATA%\cc-disksage\quarantine\` |
 | 用户规则 | `%LOCALAPPDATA%\cc-disksage\rules\*.toml` |
 
-扫描快照目前保存在进程内存；持久化到 SQLite 属于后续里程碑。
+扫描快照与重复文件哈希结果目前保存在进程内存；持久化到 SQLite 属于后续里程碑。
+MFT 秒扫由本机提权 helper 读取 NTFS 元数据，重复文件扫描只在本机读取文件内容计算
+BLAKE3 哈希；两者都不会上传任何数据。代码签名只处理本地构建产物，不涉及用户数据。
 
 ## 发送给 LLM 的内容
 

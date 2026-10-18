@@ -31,6 +31,8 @@ pub enum ScanError {
     Cancelled,
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("mft error: {0}")]
+    Mft(String),
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -155,7 +157,7 @@ fn system_time_to_timestamp(time: SystemTime) -> Option<i64> {
         .map(|duration| duration.as_secs() as i64)
 }
 
-fn is_skipped_dir(name: &str) -> bool {
+pub(crate) fn is_skipped_dir(name: &str) -> bool {
     SKIPPED_DIR_NAMES
         .iter()
         .any(|skipped| skipped.eq_ignore_ascii_case(name))
@@ -350,6 +352,7 @@ pub fn scan_volume(
     Ok(ScanSnapshot {
         id: uuid::Uuid::new_v4().to_string(),
         volume,
+        engine: "walker".into(),
         started_at,
         duration_ms: started.elapsed().as_millis() as u64,
         total_bytes: root_node.logical_bytes,

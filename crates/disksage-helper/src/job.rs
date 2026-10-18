@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use disksage_core::CleanupResult;
+use disksage_core::{CleanupResult, ScanSnapshot};
 use serde::{Deserialize, Serialize};
 
 pub const JOB_TTL_SECONDS: i64 = 900;
@@ -15,7 +15,10 @@ pub struct HelperJob {
     pub job_id: String,
     pub nonce: String,
     pub expires_at: i64,
+    #[serde(default)]
     pub rule_ids: Vec<String>,
+    #[serde(default)]
+    pub volume: Option<String>,
 }
 
 pub fn jobs_dir() -> PathBuf {
@@ -28,6 +31,10 @@ pub fn jobs_dir() -> PathBuf {
 
 pub fn result_path(job_path: &Path) -> PathBuf {
     job_path.with_extension("result.json")
+}
+
+pub fn snapshot_path(job_path: &Path) -> PathBuf {
+    job_path.with_extension("snapshot.json")
 }
 
 pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String> {
@@ -46,9 +53,6 @@ pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String
     let job: HelperJob =
         serde_json::from_str(&text).map_err(|error| format!("invalid job JSON: {error}"))?;
 
-    if job.task != "clean" {
-        return Err(format!("unsupported task: {}", job.task));
-    }
     if job.job_id.is_empty() || job.job_id.len() > 128 {
         return Err("invalid job_id".into());
     }
@@ -62,21 +66,45 @@ pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String
     if job.expires_at > now + JOB_TTL_SECONDS {
         return Err("job expiry is too far in the future".into());
     }
-    if job.rule_ids.is_empty() || job.rule_ids.len() > 100 {
-        return Err("invalid rule_ids count".into());
-    }
-    let unique = job.rule_ids.iter().collect::<HashSet<_>>();
-    if unique.len() != job.rule_ids.len() {
-        return Err("duplicate rule ids in job".into());
-    }
-    for rule_id in &job.rule_ids {
-        if rule_id.is_empty()
-            || !rule_id.chars().all(|character| {
-                character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
-            })
-        {
-            return Err(format!("invalid rule id: {rule_id}"));
+
+    match job.task.as_str() {
+        "clean" => {
+            if job.volume.is_some() {
+                return Err("clean job must not specify a volume".into());
+            }
+            if job.rule_ids.is_empty() || job.rule_ids.len() > 100 {
+                return Err("invalid rule_ids count".into());
+            }
+            let unique = job.rule_ids.iter().collect::<HashSet<_>>();
+            if unique.len() != job.rule_ids.len() {
+                return Err("duplicate rule ids in job".into());
+            }
+            for rule_id in &job.rule_ids {
+                if rule_id.is_empty()
+                    || !rule_id.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                    })
+                {
+                    return Err(format!("invalid rule id: {rule_id}"));
+                }
+            }
         }
+        "mft_scan" => {
+            if !job.rule_ids.is_empty() {
+                return Err("mft_scan job must not specify rules".into());
+            }
+            let Some(volume) = job.volume.as_deref() else {
+                return Err("mft_scan job requires a volume".into());
+            };
+            if volume.len() != 1
+                || !volume
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+            {
+                return Err("invalid volume letter".into());
+            }
+        }
+        other => return Err(format!("unsupported task: {other}")),
     }
 
     Ok(job)
@@ -85,6 +113,11 @@ pub fn load_job(job_path: &Path, allowed_dir: &Path) -> Result<HelperJob, String
 pub fn write_result(path: &Path, result: &CleanupResult) -> Result<(), String> {
     let text = serde_json::to_string_pretty(result).map_err(|error| error.to_string())?;
     fs::write(path, text).map_err(|error| format!("cannot write result: {error}"))
+}
+
+pub fn write_snapshot(path: &Path, snapshot: &ScanSnapshot) -> Result<(), String> {
+    let text = serde_json::to_string(snapshot).map_err(|error| error.to_string())?;
+    fs::write(path, text).map_err(|error| format!("cannot write snapshot: {error}"))
 }
 
 pub fn write_error_result(job_path: &Path, message: String) {
@@ -113,6 +146,7 @@ mod tests {
             nonce: "0123456789abcdef".into(),
             expires_at: Utc::now().timestamp() + 300,
             rule_ids: vec!["system.windows_temp".into()],
+            volume: None,
         };
         fs::write(&path, serde_json::to_string(&job).unwrap()).unwrap();
         path
@@ -136,6 +170,7 @@ mod tests {
             nonce: "0123456789abcdef".into(),
             expires_at: Utc::now().timestamp() - 1,
             rule_ids: vec!["system.windows_temp".into()],
+            volume: None,
         };
         fs::write(&path, serde_json::to_string(&job).unwrap()).unwrap();
         assert!(load_job(&path, temp.path()).is_err());
@@ -161,8 +196,32 @@ mod tests {
             nonce: "0123456789abcdef".into(),
             expires_at: Utc::now().timestamp() + 300,
             rule_ids: vec!["system.windows_temp".into(), "system.windows_temp".into()],
+            volume: None,
         };
         fs::write(&path, serde_json::to_string(&job).unwrap()).unwrap();
+        assert!(load_job(&path, temp.path()).is_err());
+    }
+
+    #[test]
+    fn accepts_mft_scan_job_and_rejects_invalid_volume() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mft.json");
+        let job = HelperJob {
+            task: "mft_scan".into(),
+            job_id: "mft".into(),
+            nonce: "0123456789abcdef".into(),
+            expires_at: Utc::now().timestamp() + 300,
+            rule_ids: Vec::new(),
+            volume: Some("C".into()),
+        };
+        fs::write(&path, serde_json::to_string(&job).unwrap()).unwrap();
+        assert!(load_job(&path, temp.path()).is_ok());
+
+        let bad = HelperJob {
+            volume: Some("C:\\".into()),
+            ..job
+        };
+        fs::write(&path, serde_json::to_string(&bad).unwrap()).unwrap();
         assert!(load_job(&path, temp.path()).is_err());
     }
 }

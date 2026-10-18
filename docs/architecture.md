@@ -6,7 +6,7 @@ React + TypeScript + Vite + ECharts
         ▼
 src-tauri（Tauri 命令 / AppState）
         │
-        ├─ disksage-scan    卷枚举、全盘 walker、快照/treemap
+        ├─ disksage-scan    卷枚举、全盘 walker、NTFS MFT、重复文件、快照/treemap
         ├─ disksage-rules   TOML 规则、路径安全、快速扫描、证据链
         ├─ disksage-clean   计划、回收站执行、审计
         └─ disksage-llm     OpenAI 兼容客户端、脱敏、严格校验
@@ -38,6 +38,16 @@ src-tauri（Tauri 命令 / AppState）
    `safe + default_selected + regenerable + 非管理员` 的文件项 → 走同一套
    `create_plan/execute_plan` 校验与审计。默认回收站，可选永久删除；日志写入
    `auto-clean.jsonl`。卸载钩子删除计划任务。
+10. **MFT 秒扫**：`scan_volume_mft` 校验 NTFS 后写 `mft_scan` job，通过 UAC 启动 helper。
+   helper 用 `ntfs-reader` 分块读取 `$MFT`，重建目录树并写 `<job>.snapshot.json`；
+   主进程读取快照、裁剪后存入 AppState，treemap 与普通扫描共用。
+11. **重复文件**：`find_duplicate_files` 将前端 scope 映射为文档/下载/图片/视频/桌面，
+   按大小 → 首尾 64KB BLAKE3 → 完整 BLAKE3 分组；硬链接按 Windows file ID 去重。
+   结果保存在 AppState。`delete_duplicate_files` 只接受组/文件 ID，重新校验路径、
+   大小与红线后，走 `create_plan/execute_plan` 移至回收站。
+12. **代码签名**：`build-installer.ps1 -Sign` 合并 `tauri.signed.conf.json`，Tauri 的
+   `signCommand` 调用 `src-tauri/sign-command.ps1` → `scripts/sign-binary.ps1`，
+   用 signtool 签名并验证 helper、主程序与 NSIS 安装包。
 
 ## 安全边界
 
@@ -49,13 +59,15 @@ src-tauri（Tauri 命令 / AppState）
 
 ## 当前命令
 
-`get_volumes`、`scan_volume`、`get_treemap`、`quick_scan`、`get_finding`、
-`create_plan`、`execute_plan`、`get_audit_history`、`llm_get_config`、
-`llm_set_config`、`llm_set_key`、`llm_clear_key`、`llm_test_connection`、
-`llm_preview_payload`、`llm_assess_finding`、`llm_ask_followup`、
-`get_auto_clean_status`、`set_auto_clean_config`、`run_auto_clean_now`。
+`get_volumes`、`scan_volume`、`scan_volume_mft`、`get_treemap`、`quick_scan`、
+`get_finding`、`create_plan`、`execute_plan`、`get_audit_history`、
+`find_duplicate_files`、`cancel_duplicate_scan`、`delete_duplicate_files`、
+`open_duplicate_file`、`llm_get_config`、`llm_set_config`、`llm_set_key`、
+`llm_clear_key`、`llm_test_connection`、`llm_preview_payload`、
+`llm_assess_finding`、`llm_ask_followup`、`get_auto_clean_status`、
+`set_auto_clean_config`、`run_auto_clean_now`。
 
 ## 后续
 
-MFT 快扫、重复文件、SQLite 快照持久化、代码签名与自动更新。
+SQLite 快照持久化、自动更新、托盘通知。代码签名流水线已就绪，正式发布需要提供证书。
 完整方案见 `.claude/plans/disk-cleaner-implementation.md`。

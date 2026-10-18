@@ -174,6 +174,7 @@ export default function ExplorePage({
           <p className="mt-1 text-sm text-emerald-900/55 dark:text-emerald-100/55">
             共 {formatBytes(treemap?.total_bytes ?? snapshot.allocated_bytes)} ·{" "}
             {(treemap?.file_count ?? snapshot.file_count).toLocaleString()} 个文件 ·
+            引擎：{snapshot.engine === "mft" ? "NTFS MFT" : "目录遍历"} ·
             点击区块可下钻
           </p>
         </div>

@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "build:helper:dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-helper.ps1",
     "build:helper:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-helper.ps1 -Release",
+    "sign:installers": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-installers.ps1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

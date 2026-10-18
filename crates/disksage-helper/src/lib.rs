@@ -6,7 +6,7 @@ pub mod actions;
 pub mod job;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use disksage_clean::audit::record_for_item;
 use disksage_clean::{
@@ -14,8 +14,12 @@ use disksage_clean::{
 };
 use disksage_core::{ActionSpec, CleanupResult, EnvMap};
 use disksage_rules::{RulePack, load_builtin_rules, quick_scan};
+#[cfg(windows)]
+use disksage_scan::{CancelToken, MftScanRequest, scan_volume_mft};
 
 use crate::job::HelperJob;
+#[cfg(windows)]
+use crate::job::{snapshot_path, write_snapshot};
 
 pub fn run_job(job: &HelperJob) -> CleanupResult {
     let mut result = CleanupResult {
@@ -160,6 +164,58 @@ pub fn run_job(job: &HelperJob) -> CleanupResult {
             "helper 执行完成，{} 个文件失败",
             result.failed.len()
         ));
+    }
+
+    result
+}
+
+#[cfg(windows)]
+pub fn run_mft_job(job: &HelperJob, job_path: &Path) -> CleanupResult {
+    let mut result = CleanupResult {
+        job_id: job.job_id.clone(),
+        ..CleanupResult::default()
+    };
+
+    if !actions::is_elevated() {
+        fatal(&mut result, "helper 未以管理员身份运行，拒绝执行");
+        return result;
+    }
+
+    let Some(volume) = job.volume.as_deref() else {
+        fatal(&mut result, "MFT 任务缺少卷盘符");
+        return result;
+    };
+    let letter = volume.to_ascii_uppercase().chars().next().unwrap_or('C');
+    if let Some(info) = disksage_scan::enumerate_volumes()
+        .into_iter()
+        .find(|info| info.letter == letter)
+        && !info.filesystem.eq_ignore_ascii_case("NTFS")
+    {
+        fatal(
+            &mut result,
+            format!(
+                "{} 盘不是 NTFS（{}），无法使用 MFT 扫描",
+                letter, info.filesystem
+            ),
+        );
+        return result;
+    }
+
+    match scan_volume_mft(MftScanRequest::new(letter), |_| {}, CancelToken::new()) {
+        Ok(snapshot) => {
+            let path = snapshot_path(job_path);
+            match write_snapshot(&path, &snapshot) {
+                Ok(()) => result.notes.push(format!(
+                    "MFT 扫描完成：{} 文件 / {} 目录 / {:.2} GB，用时 {} ms",
+                    snapshot.file_count,
+                    snapshot.dir_count,
+                    snapshot.allocated_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
+                    snapshot.duration_ms
+                )),
+                Err(error) => fatal(&mut result, error),
+            }
+        }
+        Err(error) => fatal(&mut result, format!("MFT 扫描失败：{error}")),
     }
 
     result
