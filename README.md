@@ -59,6 +59,8 @@
 
 ## 安装包
 
+发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0>
+
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
 | `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
