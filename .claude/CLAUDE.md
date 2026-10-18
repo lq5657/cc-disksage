@@ -52,6 +52,8 @@ npm run tauri build        # 安装包（目标）
 
 ## 当前状态（2026-10-18）
 
+v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
+
 已实现：
 
 - M0 工具链、workspace、Tauri/React 骨架

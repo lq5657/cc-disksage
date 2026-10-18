@@ -2,6 +2,9 @@
 
 对应方案：`.claude/plans/disk-cleaner-implementation.md`。
 
+v0.1.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.0
+（offline 约 212 MB、lite 约 4.9 MB；SHA-256 见 Release 附件与 `dist-installers/SHA256SUMS.txt`）。
+
 ## 已完成
 
 | 模块 | 实现 |
