@@ -1,0 +1,30 @@
+[package]
+name = "disksage-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "disksage_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "disksage-helper"
+path = "src/main.rs"
+
+[dependencies]
+disksage-core = { path = "../disksage-core" }
+disksage-scan = { path = "../disksage-scan" }
+disksage-rules = { path = "../disksage-rules" }
+disksage-clean = { path = "../disksage-clean" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

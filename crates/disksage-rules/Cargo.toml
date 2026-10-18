@@ -1,0 +1,19 @@
+[package]
+name = "disksage-rules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+disksage-core = { path = "../disksage-core" }
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+toml = "0.8"
+globset = "0.4"
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

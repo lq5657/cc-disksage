@@ -1,0 +1,78 @@
+# CC-DiskSage — 项目约定
+
+Windows 智能磁盘清理工具：Rust + Tauri 2 + React/TypeScript。详细方案见
+`.claude/plans/disk-cleaner-implementation.md`。所有计划文档、规则说明、发布清单都放在项目
+`.claude/` 下，不写入用户级 `~/.claude/`。
+
+## 不可妥协的安全规则
+
+1. 安全优先于回收量：宁可少清，不可误删。
+2. 删除只能来自声明式规则；规则必须有 positive + redline 测试。
+3. 永不手删/规则删除：`WinSxS`、`Windows\Installer`、`WindowsApps`、`System Volume Information`、
+   `pagefile.sys`、`hiberfil.sys`、`swapfile.sys`、注册表 hive、浏览器凭据、聊天数据库/媒体。
+4. 永不跟随 reparse point / junction / symlink 进行遍历或删除。
+5. 前端 IPC 只传 finding/rule/snapshot ID，绝不传任意删除路径。
+6. 规则只引用固定 `ActionSpec` 枚举；TOML 中不得出现任意命令/参数。
+7. 管理员动作只走窄接口 `disksage-helper.exe`；UI 始终 `asInvoker`。
+8. 默认删除到回收站；永久删除必须单独开关 + 二次确认。
+9. LLM 只做标注，不能新增 Finding/动作/勾选；不接收文件内容；默认脱敏。
+10. 所有展示数字来自扫描器/helper，并带 `size_provenance`。
+
+## 架构
+
+- `crates/disksage-core`：领域类型、错误、路径安全、证据模型
+- `crates/disksage-scan`：卷信息、快速扫描、并行全盘 walker、快照（MFT 二期）
+- `crates/disksage-rules`：TOML 规则 schema/loader/matcher、红线
+- `crates/disksage-clean`：计划、执行、回收站、隔离、审计
+- `crates/disksage-llm`：OpenAI 兼容客户端、脱敏、schema 校验
+- `crates/disksage-helper`：提权 helper（scan/clean 固定动作）
+- `src-tauri`：Tauri 命令、状态、capabilities
+- `src`：React UI；`rules/builtin`：内置规则与 fixture
+
+## 构建与测试
+
+```powershell
+npm install
+npm run tauri dev          # 开发
+cargo test --workspace     # Rust 测试
+cargo clippy -- -D warnings
+npm run test               # 前端测试
+npm run build              # 前端构建
+npm run build:helper:release  # 构建并复制提权 helper
+npm run tauri build        # 安装包（目标）
+```
+
+## 规则准入
+
+- 每条规则记录 `verified_at`、`verified_on`、路径来源。
+- 必须有 `rules/tests/<rule_id>/positive` 与 `redline` fixture；红线零命中。
+- 未在真实 Windows/应用版本核验的第三方应用规则不得进入安装包。
+- 新的第三方应用规则先做只读探测与 fixture，再考虑默认勾选；默认风险从 `caution` 起步。
+
+## 当前状态（2026-10-18）
+
+已实现：
+
+- M0 工具链、workspace、Tauri/React 骨架
+- M1 卷枚举、全盘并行扫描、Dashboard、treemap 空间分析
+- M3 TOML 规则引擎、红线/路径安全、快速扫描、E1–E8 证据链
+- M4 计划预览、回收站执行、审计日志、历史页
+- M6 OpenAI 兼容 LLM 设置、payload 同意、逐项分析、追问
+- 管理员清理：`disksage-helper.exe` + UAC，Windows Temp/WER/Minidump/Delivery Optimization/
+  Windows Update 缓存/DISM Analyze+StartComponentCleanup/休眠文件
+- NSIS 安装包配置（offline WebView2 / lite / helper 侧车）
+
+未实现：
+
+- Windows.old 引导、还原点/分页文件、回收站清空动作
+- MFT 秒扫、重复文件、定时清理、代码签名/自动更新
+- SQLite 快照持久化（当前快照在进程内存）
+
+验证基线：
+
+- `cargo test --workspace` 通过
+- `npm run test` / `npm run build` 通过
+- 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
+- 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
+- NSIS 安装包已完成静默安装 → 启动 → 卸载验证
+- 安装包：`dist-installers/`（offline 约 210MB / lite 约 3.4MB）

@@ -1,0 +1,81 @@
+schema_version = 1
+
+[[rules]]
+id = "apps.vscode_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "VS Code 1.10x"
+category = "apps"
+title_zh = "VS Code 缓存"
+title_en = "VS Code cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%APPDATA%\\Code"] }
+targets = [
+  { root = "%APPDATA%\\Code", include_globs = ["Cache/**", "CachedData/**", "GPUCache/**", "logs/**"], exclude_globs = ["**/User/**", "**/Backups/**", "**/workspaceStorage/**", "**/globalStorage/**"], max_depth = 4 }
+]
+explain = { what_zh = "VS Code 的缓存、编译缓存与日志。", what_en = "VS Code caches, compiled data, and logs.", impact_zh = "删除后 VS Code 首次启动或打开项目可能略慢；设置、扩展与工作区数据不受影响。", impact_en = "VS Code may start or open projects slightly slower; settings, extensions, and workspace data are untouched.", exclude_notes_zh = "硬排除用户设置、备份、workspaceStorage 与 globalStorage。", exclude_notes_en = "User settings, backups, workspaceStorage, and globalStorage are hard-excluded.", source = "VS Code user-data cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "apps.teams_classic_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Microsoft Teams classic"
+category = "apps"
+title_zh = "Teams（经典版）缓存"
+title_en = "Teams classic cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%APPDATA%\\Microsoft\\Teams"] }
+targets = [
+  { root = "%APPDATA%\\Microsoft\\Teams", include_globs = ["Cache/**", "Code Cache/**", "GPUCache/**"], exclude_globs = ["**/IndexedDB/**", "**/Local Storage/**", "**/Cookies*"], max_depth = 4 }
+]
+explain = { what_zh = "Teams 经典版的网页与代码缓存。", what_en = "Web and code cache of Microsoft Teams classic.", impact_zh = "删除后 Teams 首次加载可能略慢；登录状态与聊天记录不受影响。", impact_en = "Teams may load slightly slower; sign-in state and chat history are untouched.", exclude_notes_zh = "硬排除 IndexedDB、Local Storage 与 Cookie。", exclude_notes_en = "IndexedDB, Local Storage, and cookies are hard-excluded.", source = "Teams classic user-data cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "apps.discord_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Discord 2026"
+category = "apps"
+title_zh = "Discord 缓存"
+title_en = "Discord cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%APPDATA%\\discord"] }
+targets = [
+  { root = "%APPDATA%\\discord", include_globs = ["Cache/**", "Code Cache/**", "GPUCache/**"], exclude_globs = ["**/IndexedDB/**", "**/Local Storage/**", "**/Cookies*"], max_depth = 4 }
+]
+explain = { what_zh = "Discord 的网页与代码缓存。", what_en = "Discord web and code cache.", impact_zh = "删除后 Discord 首次加载可能略慢；登录状态与消息记录不受影响。", impact_en = "Discord may load slightly slower; sign-in state and message history are untouched.", exclude_notes_zh = "硬排除 IndexedDB、Local Storage 与 Cookie。", exclude_notes_en = "IndexedDB, Local Storage, and cookies are hard-excluded.", source = "Discord user-data cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "apps.slack_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Slack 2026"
+category = "apps"
+title_zh = "Slack 缓存"
+title_en = "Slack cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%APPDATA%\\Slack"] }
+targets = [
+  { root = "%APPDATA%\\Slack", include_globs = ["Cache/**", "Code Cache/**", "GPUCache/**"], exclude_globs = ["**/IndexedDB/**", "**/Local Storage/**", "**/Cookies*"], max_depth = 4 }
+]
+explain = { what_zh = "Slack 的网页与代码缓存。", what_en = "Slack web and code cache.", impact_zh = "删除后 Slack 首次加载可能略慢；登录状态与消息记录不受影响。", impact_en = "Slack may load slightly slower; sign-in state and message history are untouched.", exclude_notes_zh = "硬排除 IndexedDB、Local Storage 与 Cookie。", exclude_notes_en = "IndexedDB, Local Storage, and cookies are hard-excluded.", source = "Slack user-data cache layout" }
+action = { type = "trash" }

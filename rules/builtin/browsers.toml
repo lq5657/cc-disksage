@@ -1,0 +1,61 @@
+schema_version = 1
+
+[[rules]]
+id = "browser.edge_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Microsoft Edge 2026"
+category = "browser"
+title_zh = "Edge 浏览器缓存"
+title_en = "Microsoft Edge cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Microsoft\\Edge\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data", include_globs = ["*/Cache/**", "*/Code Cache/**", "*/GPUCache/**"], exclude_globs = ["**/Service Worker/**", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Network/**", "**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Edge 的网页资源、代码与 GPU 缓存。", what_en = "Edge web resource, code, and GPU caches.", impact_zh = "删除后网页首次加载可能略慢；登录状态、Cookie、历史、书签和密码不受影响。", impact_en = "The first page load may be slightly slower; sign-in state, cookies, history, bookmarks, and passwords are untouched.", exclude_notes_zh = "硬排除登录数据、Cookie、历史、书签、Service Worker 与本地存储。", exclude_notes_en = "Login data, cookies, history, bookmarks, Service Worker, and local storage are hard-excluded.", source = "Chromium Edge user-data cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "browser.chrome_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Google Chrome 2026"
+category = "browser"
+title_zh = "Chrome 浏览器缓存"
+title_en = "Google Chrome cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Google\\Chrome\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Google\\Chrome\\User Data", include_globs = ["*/Cache/**", "*/Code Cache/**", "*/GPUCache/**"], exclude_globs = ["**/Service Worker/**", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Network/**", "**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Chrome 的网页资源、代码与 GPU 缓存。", what_en = "Chrome web resource, code, and GPU caches.", impact_zh = "删除后网页首次加载可能略慢；登录状态、Cookie、历史、书签和密码不受影响。", impact_en = "The first page load may be slightly slower; sign-in state, cookies, history, bookmarks, and passwords are untouched.", exclude_notes_zh = "硬排除登录数据、Cookie、历史、书签、Service Worker 与本地存储。", exclude_notes_en = "Login data, cookies, history, bookmarks, Service Worker, and local storage are hard-excluded.", source = "Chromium Chrome user-data cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "browser.firefox_cache"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Mozilla Firefox 2026"
+category = "browser"
+title_zh = "Firefox 浏览器缓存"
+title_en = "Mozilla Firefox cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles", include_globs = ["*/cache2/**"], exclude_globs = ["**/*.sqlite", "**/logins.json", "**/key4.db", "**/cert9.db"], max_depth = 4 }
+]
+explain = { what_zh = "Firefox 的网页缓存目录 cache2。", what_en = "Firefox web cache directory cache2.", impact_zh = "删除后网页首次加载可能略慢；Cookie、历史、书签和密码不受影响。", impact_en = "The first page load may be slightly slower; cookies, history, bookmarks, and passwords are untouched.", exclude_notes_zh = "硬排除 cookies.sqlite、places.sqlite、logins.json、key4.db、cert9.db。", exclude_notes_en = "cookies.sqlite, places.sqlite, logins.json, key4.db, and cert9.db are hard-excluded.", source = "Mozilla Firefox cache2 layout" }
+action = { type = "trash" }

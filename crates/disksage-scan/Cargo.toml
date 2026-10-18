@@ -1,0 +1,18 @@
+[package]
+name = "disksage-scan"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+disksage-core = { path = "../disksage-core" }
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+sysinfo = "0.39"
+rayon = "1.12"
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
