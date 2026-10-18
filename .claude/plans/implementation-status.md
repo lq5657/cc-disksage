@@ -16,17 +16,18 @@
 | 历史 | 读取本地审计日志并展示 |
 | LLM | OpenAI 兼容、Ollama `/v1`、Credential Manager、payload 预览/同意、逐项分析、追问、严格 schema/证据 ID/数字校验、脱敏 |
 | 管理员清理 | `disksage-helper.exe`（scan/clean 固定任务、nonce/expiry、提权检查、规则重扫、路径/红线校验）；Windows Temp、机器 WER、Minidump、传递优化、Windows Update 缓存、DISM Analyze/StartComponentCleanup、休眠文件 |
+| 系统引导/回收站 | Windows.old → cleanmgr；还原点 → 系统保护；分页文件 → 系统属性；回收站 → 系统 API 清空 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（44 项，2 个 ignored）
+- `cargo test --workspace`：通过（46 项，2 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
 - 真机 C 盘扫描：711,465 文件 / 198,923 目录 / 131.07 GB / 63.2 秒 / 102 个权限错误
-- 快速扫描真机结果（含管理员项）：npm 971MB、Chrome 758MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 24MB、VS Code 12.5MB、Edge 6.7MB、着色器 3.2MB、Windows Update 缓存 838MB（管理员）、Cargo 379MB（谨慎）
+- 快速扫描真机结果（含管理员/维护项，13 项，约 31 秒热缓存）：npm 971MB、Chrome 758MB、Go 516MB、pip 393MB、Temp 326MB、缩略图 24MB、VS Code 12.5MB、Edge 6.7MB、着色器 3.2MB、Windows Update 缓存 838MB（管理员）、Cargo 379MB（谨慎）；回收站/分页文件/还原点引导项已出现（默认不勾选）
 - 回收站删除 API：真机通过
 - Windows Credential Manager roundtrip：真机通过
 - helper 非管理员环境拒绝执行并写出结果：真机通过
@@ -34,13 +35,12 @@
 
 ## 未完成（下一阶段）
 
-1. Windows.old 引导、还原点/分页文件、回收站清空动作。
-2. NTFS MFT 秒扫（`mft`/`ntfs` crate），与 walker 基准对比。
-3. 重复文件查找（大小分组 + 部分/完整哈希 + 硬链接去重）。
-4. 定时/低空间自动清理（Task Scheduler）与托盘通知。
-5. SQLite 快照持久化（当前快照在进程内存，重启丢失）。
-6. 代码签名、自动更新、per-machine 安装变体、便携版。
-7. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
+1. NTFS MFT 秒扫（`mft`/`ntfs` crate），与 walker 基准对比。
+2. 重复文件查找（大小分组 + 部分/完整哈希 + 硬链接去重）。
+3. 定时/低空间自动清理（Task Scheduler）与托盘通知。
+4. SQLite 快照持久化（当前快照在进程内存，重启丢失）。
+5. 代码签名、自动更新、per-machine 安装变体、便携版。
+6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
 
 ## 已知限制
 

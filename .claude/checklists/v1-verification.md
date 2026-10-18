@@ -26,6 +26,9 @@
 - [ ] DISM Analyze 只读输出正常；StartComponentCleanup 不使用 /ResetBase
 - [ ] helper 在非管理员环境拒绝执行
 - [ ] 审计日志包含 elevation=true 的管理员记录
+- [ ] Windows.old 引导打开 cleanmgr；还原点打开系统保护；分页文件打开系统属性
+- [ ] 回收站清空通过系统 API 执行；清空后不可恢复提示正确
+- [ ] 系统引导项不会直接删除文件
 - [ ] 审计日志与历史页记录正确
 - [ ] LLM：payload 预览 → 同意 → 分析；无 Key/断网时回退
 - [ ] LLM 输出含数字/未知证据 ID 时被拒绝

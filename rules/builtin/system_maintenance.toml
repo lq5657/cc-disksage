@@ -1,0 +1,81 @@
+schema_version = 1
+
+[[rules]]
+id = "system.windows_old"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Windows 11 26200"
+category = "system_maintenance"
+title_zh = "旧版 Windows 安装（Windows.old）"
+title_en = "Previous Windows installation (Windows.old)"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+min_age_days = 0
+detect = { path_exists_any = ["%SYSTEMDRIVE%\\Windows.old"] }
+targets = [
+  { root = "%SYSTEMDRIVE%\\Windows.old", include_globs = ["**/*"], exclude_globs = [], max_depth = 4 }
+]
+explain = { what_zh = "系统升级时保留的旧版 Windows 文件，用于回滚。", what_en = "Previous Windows installation files kept for rollback after an upgrade.", impact_zh = "将打开系统磁盘清理工具；删除后无法回滚到旧版本。", impact_en = "Opens Windows Disk Cleanup; deleting it removes the rollback option.", exclude_notes_zh = "本工具不会直接删除，由你在系统界面确认。", exclude_notes_en = "This tool never deletes it directly; you confirm in the system UI.", source = "Windows.old supported removal via Disk Cleanup" }
+action = { type = "guided", guide = "clean_mgr" }
+
+[[rules]]
+id = "system.restore_points"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Windows 11 26200"
+category = "system_maintenance"
+title_zh = "系统还原点"
+title_en = "System restore points"
+risk = "danger"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+min_age_days = 0
+detect = { path_exists_any = ["%WINDIR%\\System32\\SystemPropertiesProtection.exe"] }
+targets = [
+  { root = "%WINDIR%\\Logs", include_globs = ["__disksage_never_match__"], exclude_globs = [], max_depth = 1 }
+]
+explain = { what_zh = "系统保护/还原点可能占用较多空间。", what_en = "System Protection restore points can consume significant space.", impact_zh = "将打开系统保护设置；删除还原点后无法再回滚到对应时间点。", impact_en = "Opens System Protection settings; deleted restore points cannot be restored.", exclude_notes_zh = "本工具不会自动删除还原点，由你在系统界面操作。", exclude_notes_en = "The tool never deletes restore points automatically; you act in the system UI.", source = "SystemPropertiesProtection.exe" }
+action = { type = "guided", guide = "system_protection" }
+
+[[rules]]
+id = "system.pagefile"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Windows 11 26200"
+category = "system_maintenance"
+title_zh = "分页文件（虚拟内存）"
+title_en = "Page file (virtual memory)"
+risk = "danger"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+min_age_days = 0
+detect = { path_exists_any = ["%WINDIR%\\System32\\SystemPropertiesAdvanced.exe"] }
+targets = [
+  { root = "%WINDIR%\\Logs", include_globs = ["__disksage_never_match__"], exclude_globs = [], max_depth = 1 }
+]
+explain = { what_zh = "系统分页文件可能占用数 GB 空间。", what_en = "The system page file can occupy several GB.", impact_zh = "将打开系统高级属性；分页文件大小/位置需要你手动调整，错误配置可能影响稳定性。", impact_en = "Opens System Properties Advanced; page file size/location must be changed manually and a wrong setting can affect stability.", exclude_notes_zh = "本工具不会自动修改分页文件。", exclude_notes_en = "The tool never changes the page file automatically.", source = "SystemPropertiesAdvanced.exe" }
+action = { type = "guided", guide = "pagefile_settings" }
+
+[[rules]]
+id = "system.recycle_bin"
+version = 1
+verified_at = "2026-10-18"
+verified_on = "Windows 11 26200"
+category = "system_maintenance"
+title_zh = "回收站"
+title_en = "Recycle Bin"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+min_age_days = 0
+detect = { path_exists_any = ["%SYSTEMDRIVE%\\$Recycle.Bin"] }
+targets = [
+  { root = "%WINDIR%\\Logs", include_globs = ["__disksage_never_match__"], exclude_globs = [], max_depth = 1 }
+]
+explain = { what_zh = "回收站中保存着已删除但尚未清空的文件。", what_en = "The Recycle Bin contains deleted files that have not been purged.", impact_zh = "通过系统 API 清空回收站；清空后无法恢复其中的文件。", impact_en = "Empties the Recycle Bin through the system API; files cannot be restored afterwards.", exclude_notes_zh = "不会触碰回收站以外的文件；清空前请确认没有需要恢复的内容。", exclude_notes_en = "No files outside the Recycle Bin are touched; confirm there is nothing to restore.", source = "Windows Recycle Bin" }
+action = { type = "empty_recycle_bin" }

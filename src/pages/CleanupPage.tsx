@@ -448,6 +448,10 @@ function PlanPreviewModal({
     (item) => item.recoverability === "irreversible",
   );
   const hasAdmin = preview.items.some((item) => item.requires_admin);
+  const hasSystemAction = preview.items.some((item) => item.action !== "file");
+  const onlyGuided =
+    preview.items.length > 0 &&
+    preview.items.every((item) => item.action === "guided");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-emerald-950/30 p-4 backdrop-blur-sm">
@@ -506,14 +510,22 @@ function PlanPreviewModal({
                 </div>
                 <div className="shrink-0 text-right">
                   <div className="font-semibold">
-                    {item.requires_admin && item.bytes === 0
-                      ? "待提权实测"
-                      : formatBytes(item.bytes)}
+                    {item.action === "guided"
+                      ? "系统界面"
+                      : item.action === "recycle_bin"
+                        ? "以系统为准"
+                        : item.requires_admin && item.bytes === 0
+                          ? "待提权实测"
+                          : formatBytes(item.bytes)}
                   </div>
                   <div className="text-xs text-emerald-900/45 dark:text-emerald-100/45">
-                    {item.requires_admin && item.file_count === 0
-                      ? "执行时扫描"
-                      : `${item.file_count.toLocaleString()} 个文件`}
+                    {item.action === "guided"
+                      ? "打开系统设置"
+                      : item.action === "recycle_bin"
+                        ? "系统 API"
+                        : item.requires_admin && item.file_count === 0
+                          ? "执行时扫描"
+                          : `${item.file_count.toLocaleString()} 个文件`}
                   </div>
                 </div>
               </div>
@@ -532,6 +544,14 @@ function PlanPreviewModal({
               计划包含管理员项。执行时会弹出 Windows UAC 授权框；请在弹窗中允许
               disksage-helper.exe。helper 会重新扫描管理员目录、再次校验红线，并只执行规则定义的动作。
               管理员项的预览大小可能为 0 或不完整。
+            </div>
+          ) : null}
+
+          {hasSystemAction ? (
+            <div className="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+              <AlertTriangle className="mb-1 h-4 w-4" />
+              系统引导动作会打开 Windows 设置/磁盘清理，由你在系统界面确认；回收站动作会通过系统
+              API 清空回收站，清空后不可恢复。本工具不会绕过系统确认。
             </div>
           ) : null}
 
@@ -573,7 +593,11 @@ function PlanPreviewModal({
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              {executing ? "正在清理…" : "执行清理"}
+              {executing
+                ? "正在清理…"
+                : onlyGuided
+                  ? "打开系统设置"
+                  : "执行清理"}
             </button>
           </div>
         </footer>
@@ -677,6 +701,9 @@ export default function CleanupPage() {
     return byRisk;
   }, [findings]);
 
+  const openedGuide =
+    result?.notes.some((note) => note.includes("已打开系统设置")) ?? false;
+
   function toggle(id: string) {
     setSelected((current) => {
       const next = new Set(current);
@@ -694,7 +721,11 @@ export default function CleanupPage() {
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
             <div className="min-w-0 flex-1">
               <h2 className="font-semibold">
-                {result.cancelled ? "清理已取消" : "清理完成"}
+                {result.cancelled
+                  ? "清理已取消"
+                  : openedGuide && result.deleted === 0
+                    ? "系统设置已打开"
+                    : "清理完成"}
               </h2>
               <p className="mt-1 text-sm text-emerald-900/70 dark:text-emerald-100/70">
                 已删除 {result.deleted.toLocaleString()} 个文件，合计{" "}
@@ -820,6 +851,15 @@ export default function CleanupPage() {
                 管理员项在预览中可能显示 0 B；执行时会通过 UAC 提权 helper 重新扫描并校验。
               </span>
             ) : null}
+            {findings.some(
+              (finding) =>
+                finding.action?.type === "guided" ||
+                finding.action?.type === "empty_recycle_bin",
+            ) ? (
+              <span className="mt-1 block text-xs text-amber-700 dark:text-amber-300">
+                系统引导/回收站项不会按文件删除：引导动作会打开 Windows 设置，回收站动作会调用系统 API。
+              </span>
+            ) : null}
           </div>
           </>
         ) : null}
@@ -847,6 +887,9 @@ export default function CleanupPage() {
             <div className="divide-y divide-emerald-900/10 dark:divide-emerald-100/10">
               {findings.map((finding) => {
                 const checked = selected.has(finding.id);
+                const actionType = finding.action?.type;
+                const isGuided = actionType === "guided";
+                const isRecycle = actionType === "empty_recycle_bin";
                 return (
                   <div
                     key={finding.id}
@@ -880,12 +923,23 @@ export default function CleanupPage() {
                     </div>
                     <div className="text-right">
                       <div className="font-semibold">
-                        {finding.requires_admin && finding.allocated_bytes === 0
-                          ? "待扫描"
-                          : formatBytes(finding.allocated_bytes)}
+                        {isGuided
+                          ? "系统界面"
+                          : isRecycle
+                            ? "以系统为准"
+                            : finding.requires_admin &&
+                                finding.allocated_bytes === 0
+                              ? "待扫描"
+                              : formatBytes(finding.allocated_bytes)}
                       </div>
                       <div className="text-xs text-emerald-900/45 dark:text-emerald-100/45">
-                        {finding.requires_admin ? "提权后实测" : "measured"}
+                        {isGuided
+                          ? "打开系统设置"
+                          : isRecycle
+                            ? "清空回收站"
+                            : finding.requires_admin
+                              ? "提权后实测"
+                              : "measured"}
                       </div>
                     </div>
                     <button

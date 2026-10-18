@@ -22,12 +22,15 @@ src-tauri（Tauri 命令 / AppState）
    `Finding`（含 E1–E8 证据）和精确文件列表；文件列表只留在 Rust 侧。
 4. **计划**：`create_plan(finding_ids)` 重新校验每个文件仍在允许根目录内、不是
    reparse point、不命中红线；frontend 只收到汇总预览。
-5. **执行**：`execute_plan(plan_id)` 二次校验后调用回收站/删除；逐项写审计。
-6. **管理员执行**：普通项在主进程执行；管理员项写入 `%LOCALAPPDATA%\cc-disksage\jobs\<job>.json`，
+5. **执行**：`execute_plan(plan_id)` 二次校验后调用回收站/删除；逐项写审计。回收站清空通过
+   PowerShell 的 `Clear-RecycleBin` 系统 API 执行，不可恢复。
+6. **系统引导**：Windows.old/还原点/分页文件规则的 action 为 `Guided`；Tauri 层打开
+   `cleanmgr.exe`、`SystemPropertiesProtection.exe` 或 `SystemPropertiesAdvanced.exe`，不直接删除。
+7. **管理员执行**：普通项在主进程执行；管理员项写入 `%LOCALAPPDATA%\cc-disksage\jobs\<job>.json`，
    通过 `Start-Process -Verb RunAs` 启动 `disksage-helper.exe`。helper 校验 nonce/过期时间/规则 ID，
    重新加载编译进二进制的规则并提权扫描，只执行固定 `ActionSpec`；服务名白名单为
    `wuauserv/bits/dosvc`。结果写回 `<job>.result.json`，主进程合并并展示。
-7. **LLM**：`llm_preview_payload` 返回脱敏 payload；用户确认后
+8. **LLM**：`llm_preview_payload` 返回脱敏 payload；用户确认后
    `llm_assess_finding` 调用 provider，校验 evidence ID、数字与 schema；失败回退。
 
 ## 安全边界

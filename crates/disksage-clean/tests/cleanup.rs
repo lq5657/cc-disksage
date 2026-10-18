@@ -227,3 +227,37 @@ fn admin_action_without_files_is_kept_for_helper() {
     );
     assert!(plan.requires_admin);
 }
+
+#[test]
+fn action_only_recycle_bin_plan_is_kept_and_dry_run_safe() {
+    let temp = tempfile::tempdir().unwrap();
+    let env = env_for(temp.path(), None);
+    let plan = create_plan(
+        vec![candidate(vec![], vec![], ActionSpec::EmptyRecycleBin)],
+        &env,
+    )
+    .unwrap();
+
+    assert_eq!(plan.items.len(), 1);
+    assert_eq!(plan.items[0].file_count, 0);
+    assert!(!plan.requires_admin);
+    assert!(
+        plan.warnings
+            .iter()
+            .any(|warning| warning.code == "system_action")
+    );
+
+    let result = execute_plan(
+        &plan,
+        &env,
+        ExecutionOptions {
+            confirm: true,
+            dry_run: true,
+            elevation: false,
+        },
+        None,
+    )
+    .unwrap();
+    assert!(result.notes.iter().any(|note| note.contains("dry-run")));
+    assert_eq!(result.deleted, 0);
+}

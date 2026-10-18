@@ -207,3 +207,45 @@ action = { type = "trash" }
     assert!(finding.consequence.contains("管理员"));
     assert!(result.matches.get(&finding.id).unwrap().is_empty());
 }
+
+#[test]
+fn guided_action_without_files_is_reported() {
+    let temp = tempfile::tempdir().unwrap();
+    let text = r#"
+schema_version = 1
+[[rules]]
+id = "test.guided"
+version = 1
+category = "test"
+title_zh = "引导测试"
+title_en = "Guided test"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+detect = { path_exists_any = ["%TEMP%"] }
+targets = [{ root = "%TEMP%", include_globs = ["__never__"], exclude_globs = [], max_depth = 4 }]
+explain = { what_zh = "测试", what_en = "Test", impact_zh = "打开设置", impact_en = "Open settings", source = "fixture" }
+action = { type = "guided", guide = "clean_mgr" }
+"#;
+    let pack = parse_rule_pack("guided", text).unwrap();
+    let env = env_for(temp.path(), None);
+    let result = quick_scan(&pack, &env, false).unwrap();
+
+    assert_eq!(result.findings.len(), 1);
+    let finding = &result.findings[0];
+    assert_eq!(finding.file_count, 0);
+    assert!(matches!(
+        finding.action,
+        disksage_core::ActionSpec::Guided { .. }
+    ));
+    assert!(matches!(
+        finding.size_provenance,
+        disksage_core::SizeProvenance::Estimated
+    ));
+    assert!(finding.consequence.contains("系统界面"));
+
+    let json = serde_json::to_string(finding).unwrap();
+    assert!(json.contains("\"type\":\"guided\""));
+    assert!(json.contains("\"guide\":\"clean_mgr\""));
+}

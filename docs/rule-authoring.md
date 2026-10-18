@@ -100,8 +100,11 @@ action = { type = "trash" }
 - `dism_start_component_cleanup`：`StartComponentCleanup`，**不使用 `/ResetBase`**
 - `hibernate_off`：`powercfg /hibernate off`
 
-对于没有文件目标的动作规则（DISM/休眠），`targets` 使用一个存在但永不匹配的目录（如
-`%WINDIR%\Logs` + `__disksage_never_match__`），以便规则能进入发现列表。
+对于没有文件目标的动作规则（DISM/休眠/引导/回收站），`targets` 使用一个存在但永不匹配的目录
+（如 `%WINDIR%\Logs` + `__disksage_never_match__`），以便规则能进入发现列表。
+
+`Guided` 动作只打开系统界面（磁盘清理、系统保护、系统属性），本工具不直接删除。
+`empty_recycle_bin` 通过系统 API 清空回收站，清空后不可恢复。
 
 ## 第三方应用规则
 

@@ -59,6 +59,11 @@ export interface SampleFile {
   modified_at: number | null;
 }
 
+export interface FindingAction {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface Finding {
   id: string;
   rule_id: string;
@@ -80,7 +85,7 @@ export interface Finding {
   sample_files: SampleFile[];
   evidence: Evidence[];
   consequence: string;
-  action: unknown;
+  action: FindingAction;
   llm: unknown | null;
 }
 
@@ -185,6 +190,7 @@ export interface PlanPreviewItem {
   file_count: number;
   recoverability: Recoverability;
   requires_admin: boolean;
+  action: string;
 }
 
 export interface PlanPreview {

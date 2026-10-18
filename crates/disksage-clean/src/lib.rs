@@ -5,6 +5,7 @@ pub mod error;
 pub mod executor;
 pub mod fs_safety;
 pub mod plan;
+pub mod recycle_bin;
 
 pub use audit::{AuditLog, AuditRecord};
 pub use disksage_core as core;

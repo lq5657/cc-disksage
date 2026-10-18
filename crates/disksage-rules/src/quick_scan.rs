@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::DateTime;
 use disksage_core::path_safety::is_strict_descendant;
 use disksage_core::{
-    Evidence, EvidenceKind, EvidenceSource, Finding, MatchedPath, Recoverability, RiskLevel,
-    SampleFile, SizeProvenance,
+    ActionSpec, Evidence, EvidenceKind, EvidenceSource, Finding, MatchedPath, Recoverability,
+    RiskLevel, SampleFile, SizeProvenance,
 };
 use uuid::Uuid;
 
@@ -31,7 +31,7 @@ pub fn quick_scan(
 
     for compiled in &rules {
         let files = compiled.matched_files(env);
-        if files.is_empty() && !compiled.rule.requires_admin {
+        if files.is_empty() && !compiled.rule.requires_admin && !is_action_only(&compiled.action) {
             continue;
         }
         let finding = build_finding(compiled, &files);
@@ -58,6 +58,13 @@ fn risk_order(risk: RiskLevel) -> u8 {
         RiskLevel::Caution => 1,
         RiskLevel::Danger => 2,
     }
+}
+
+fn is_action_only(action: &ActionSpec) -> bool {
+    matches!(
+        action,
+        ActionSpec::EmptyRecycleBin | ActionSpec::Guided { .. }
+    )
 }
 
 fn build_finding(compiled: &CompiledRule, files: &[(PathBuf, u64)]) -> Finding {
@@ -159,7 +166,7 @@ fn build_finding(compiled: &CompiledRule, files: &[(PathBuf, u64)]) -> Finding {
         allocated_bytes,
         logical_bytes: allocated_bytes,
         file_count,
-        size_provenance: if rule.requires_admin {
+        size_provenance: if rule.requires_admin || is_action_only(&compiled.action) {
             SizeProvenance::Estimated
         } else {
             SizeProvenance::Scanner
@@ -172,6 +179,8 @@ fn build_finding(compiled: &CompiledRule, files: &[(PathBuf, u64)]) -> Finding {
         consequence: {
             let prefix = if rule.requires_admin {
                 "需要管理员权限；执行时由提权 helper 重新扫描并校验，预览大小可能不完整。"
+            } else if is_action_only(&compiled.action) {
+                "该动作不基于文件匹配，会通过 Windows 系统界面或系统 API 完成；本工具不会绕过系统确认。"
             } else {
                 ""
             };
@@ -204,6 +213,7 @@ fn build_evidence(
         .map(|target| target.root.display().to_string())
         .collect::<Vec<_>>()
         .join("; ");
+    let action_only = is_action_only(&compiled.action);
 
     let mut evidence = Vec::new();
     evidence.push(Evidence {
@@ -226,7 +236,9 @@ fn build_evidence(
         id: "E2".into(),
         source: EvidenceSource::AppDetection,
         kind: EvidenceKind::AppDetection,
-        claim: if rule.requires_admin {
+        claim: if action_only {
+            "该规则为系统引导或回收站动作，不扫描文件。".to_string()
+        } else if rule.requires_admin {
             format!("检测到目标目录（未提权，大小可能不完整）：{roots}")
         } else {
             format!("检测到目标目录：{roots}")
@@ -241,7 +253,11 @@ fn build_evidence(
         id: "E3".into(),
         source: EvidenceSource::Rule,
         kind: EvidenceKind::Path,
-        claim: "删除范围仅限于规则模板下匹配的文件，目录根本身不会被删除。".into(),
+        claim: if action_only {
+            "不会由规则直接删除文件；由 Windows 系统界面或系统 API 执行。".into()
+        } else {
+            "删除范围仅限于规则模板下匹配的文件，目录根本身不会被删除。".into()
+        },
         path: compiled.targets.first().map(|target| target.root.clone()),
         bytes: None,
         timestamp: None,
@@ -252,16 +268,20 @@ fn build_evidence(
         id: "E4".into(),
         source: EvidenceSource::Scanner,
         kind: EvidenceKind::Size,
-        claim: format!(
-            "{}：{}，共 {} 个文件",
-            if rule.requires_admin {
-                "提权前估算"
-            } else {
-                "扫描器实测"
-            },
-            format_bytes(bytes),
-            file_count
-        ),
+        claim: if action_only {
+            "该动作不基于文件匹配，大小以 Windows 系统界面为准。".to_string()
+        } else {
+            format!(
+                "{}：{}，共 {} 个文件",
+                if rule.requires_admin {
+                    "提权前估算"
+                } else {
+                    "扫描器实测"
+                },
+                format_bytes(bytes),
+                file_count
+            )
+        },
         path: None,
         bytes: Some(bytes),
         timestamp: None,

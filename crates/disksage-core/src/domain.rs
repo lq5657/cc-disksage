@@ -182,7 +182,9 @@ pub enum ActionSpec {
     },
     DismAnalyze,
     DismStartComponentCleanup,
-    Guided(GuideId),
+    Guided {
+        guide: GuideId,
+    },
     HibernateOff,
     CreateRestorePoint,
 }

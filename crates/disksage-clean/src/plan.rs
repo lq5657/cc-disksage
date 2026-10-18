@@ -37,8 +37,15 @@ pub fn create_plan(
 
     for candidate in candidates {
         let is_admin = candidate.requires_admin;
+        let action_only = matches!(
+            candidate.action,
+            ActionSpec::EmptyRecycleBin | ActionSpec::Guided { .. }
+        );
 
-        if !is_admin && !matches!(candidate.action, ActionSpec::Trash | ActionSpec::Delete) {
+        if !is_admin
+            && !matches!(candidate.action, ActionSpec::Trash | ActionSpec::Delete)
+            && !action_only
+        {
             warnings.push(PlanWarning {
                 code: "unsupported_action".into(),
                 message_zh: format!("动作 {:?} 需要管理员权限，已跳过。", candidate.action),
@@ -103,7 +110,7 @@ pub fn create_plan(
                 message_en: format!("{rejected} paths failed safety validation and were skipped."),
             });
         }
-        if valid_files.is_empty() && !is_admin {
+        if valid_files.is_empty() && !is_admin && !action_only {
             continue;
         }
 
@@ -128,6 +135,19 @@ pub fn create_plan(
             code: "admin_helper".into(),
             message_zh: "管理员项将在执行时通过 UAC 提权 helper 重新扫描并校验；预览大小为提权前估算。".into(),
             message_en: "Administrator items are re-scanned and validated by the elevated helper; preview sizes may be incomplete.".into(),
+        });
+    }
+
+    if items.iter().any(|item| {
+        matches!(
+            item.action,
+            ActionSpec::EmptyRecycleBin | ActionSpec::Guided { .. }
+        )
+    }) {
+        warnings.push(PlanWarning {
+            code: "system_action".into(),
+            message_zh: "系统引导/回收站动作不会按文件删除：引导动作会打开 Windows 系统界面，回收站动作会调用系统 API；请确认后再执行。".into(),
+            message_en: "Guided and recycle-bin actions do not delete files directly: guided actions open Windows settings and the recycle-bin action calls the system API. Please confirm.".into(),
         });
     }
 

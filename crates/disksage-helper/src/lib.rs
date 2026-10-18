@@ -132,7 +132,7 @@ pub fn run_job(job: &HelperJob) -> CleanupResult {
                 actions::empty_recycle_bin(&mut result);
                 audit_action(&audit, job, &finding.rule_id, "empty_recycle_bin");
             }
-            ActionSpec::Guided(_) => result.notes.push(format!(
+            ActionSpec::Guided { .. } => result.notes.push(format!(
                 "{}：该动作需要在主界面打开系统设置执行",
                 finding.rule_id
             )),

@@ -24,6 +24,10 @@ const BUILTIN_PACKS: &[(&str, &str)] = &[
         "system_admin.toml",
         include_str!("../../../rules/builtin/system_admin.toml"),
     ),
+    (
+        "system_maintenance.toml",
+        include_str!("../../../rules/builtin/system_maintenance.toml"),
+    ),
 ];
 
 pub fn parse_rule_pack(pack_name: &str, text: &str) -> Result<RulePack, RuleError> {

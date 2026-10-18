@@ -6,8 +6,8 @@ use disksage_clean::{
     AuditLog, ExecutionOptions, PlanCandidate, create_plan as build_plan, execute_plan as run_plan,
 };
 use disksage_core::{
-    CleanupPlan, CleanupResult, DirNode, Finding, LlmAssessment, PlanWarning, Recoverability,
-    RiskLevel, ScanSnapshot, VolumeInfo,
+    ActionSpec, CleanupPlan, CleanupResult, DirNode, Finding, GuideId, LlmAssessment, PlanWarning,
+    Recoverability, RiskLevel, ScanSnapshot, VolumeInfo,
 };
 use disksage_llm::{
     LlmClient, LlmConfig, LlmPreset, PRESETS, RedactContext, build_finding_payload,
@@ -150,6 +150,21 @@ struct PlanPreviewItem {
     file_count: u64,
     recoverability: Recoverability,
     requires_admin: bool,
+    action: String,
+}
+
+fn action_kind(action: &ActionSpec) -> &'static str {
+    match action {
+        ActionSpec::Trash | ActionSpec::Delete => "file",
+        ActionSpec::EmptyRecycleBin => "recycle_bin",
+        ActionSpec::Guided { .. } => "guided",
+        ActionSpec::ServiceCleanup { .. } => "service_cleanup",
+        ActionSpec::DismAnalyze => "dism_analyze",
+        ActionSpec::DismStartComponentCleanup => "dism_component_cleanup",
+        ActionSpec::HibernateOff => "hibernate_off",
+        ActionSpec::Quarantine => "quarantine",
+        ActionSpec::CreateRestorePoint => "create_restore_point",
+    }
 }
 
 #[derive(Serialize)]
@@ -373,6 +388,7 @@ async fn create_plan(
                 file_count: item.file_count,
                 recoverability: item.recoverability,
                 requires_admin: item.requires_admin,
+                action: action_kind(&item.action).to_string(),
             })
             .collect(),
         warnings: plan.warnings.clone(),
@@ -401,11 +417,17 @@ async fn execute_plan(
 
     let mut normal_items = Vec::new();
     let mut admin_items = Vec::new();
+    let mut guided = Vec::new();
     for item in plan.items {
-        if item.requires_admin {
-            admin_items.push(item);
-        } else {
-            normal_items.push(item);
+        match &item.action {
+            ActionSpec::Guided { guide } => guided.push(*guide),
+            _ => {
+                if item.requires_admin {
+                    admin_items.push(item);
+                } else {
+                    normal_items.push(item);
+                }
+            }
         }
     }
 
@@ -459,7 +481,52 @@ async fn execute_plan(
         }
     }
 
+    for guide in guided {
+        match open_guide(guide) {
+            Ok(()) => result
+                .notes
+                .push(format!("已打开系统设置：{}", guide_label_zh(guide))),
+            Err(error) => result
+                .notes
+                .push(format!("打开 {} 失败：{error}", guide_label_zh(guide))),
+        }
+    }
+
     Ok(result)
+}
+
+fn open_guide(guide: GuideId) -> Result<(), String> {
+    let windows = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let system32 = windows.join("System32");
+    let (program, args): (&str, &[&str]) = match guide {
+        GuideId::WindowsStorageSettings => ("explorer.exe", &["ms-settings:storagesense"]),
+        GuideId::WindowsUpdateSettings => ("explorer.exe", &["ms-settings:windowsupdate"]),
+        GuideId::SystemProtection => ("SystemPropertiesProtection.exe", &[]),
+        GuideId::PagefileSettings => ("SystemPropertiesAdvanced.exe", &[]),
+        GuideId::CleanMgr => ("cleanmgr.exe", &[]),
+    };
+    let executable = if program.eq_ignore_ascii_case("explorer.exe") {
+        windows.join(program)
+    } else {
+        system32.join(program)
+    };
+    std::process::Command::new(executable)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn guide_label_zh(guide: GuideId) -> &'static str {
+    match guide {
+        GuideId::WindowsStorageSettings => "存储设置",
+        GuideId::WindowsUpdateSettings => "Windows 更新设置",
+        GuideId::SystemProtection => "系统保护（还原点）",
+        GuideId::PagefileSettings => "系统属性 → 高级 → 虚拟内存",
+        GuideId::CleanMgr => "磁盘清理（Windows.old）",
+    }
 }
 
 fn merge_cleanup_result(target: &mut CleanupResult, mut partial: CleanupResult) {

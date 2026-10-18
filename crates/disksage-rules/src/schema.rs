@@ -121,7 +121,7 @@ impl RuleAction {
             },
             Self::DismAnalyze => ActionSpec::DismAnalyze,
             Self::DismStartComponentCleanup => ActionSpec::DismStartComponentCleanup,
-            Self::Guided { guide } => ActionSpec::Guided(*guide),
+            Self::Guided { guide } => ActionSpec::Guided { guide: *guide },
             Self::HibernateOff => ActionSpec::HibernateOff,
             Self::CreateRestorePoint => ActionSpec::CreateRestorePoint,
         })
