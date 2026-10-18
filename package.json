@@ -1,7 +1,7 @@
 {
   "name": "cc-disksage",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Offline-first Windows disk cleanup with evidence chain",
   "type": "module",
   "scripts": {

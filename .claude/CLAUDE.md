@@ -17,6 +17,8 @@ Windows 智能磁盘清理工具：Rust + Tauri 2 + React/TypeScript。详细方
 8. 默认删除到回收站；永久删除必须单独开关 + 二次确认。
 9. LLM 只做标注，不能新增 Finding/动作/勾选；不接收文件内容；默认脱敏。
 10. 所有展示数字来自扫描器/helper，并带 `size_provenance`。
+11. 大文件删除必须由用户逐项确认，只进回收站，拒绝 Windows/Program Files/ProgramData；
+    AI 只根据元数据给建议，不能新增候选、勾选或删除文件。
 
 ## 架构
 
@@ -52,7 +54,8 @@ npm run tauri build        # 安装包（目标）
 
 ## 当前状态（2026-10-18）
 
-v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
+当前发布版 v0.1.1：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
+v0.2.0 源码与功能验证已完成，安装包构建因内存不足中断，待重试后发布。
 
 已实现：
 
@@ -73,6 +76,7 @@ v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
 - SQLite 持久化：扫描摘要、重复文件结果、扫描历史，重启恢复，保留最近 20 次
 - 数据目录跟随安装盘：D 盘安装使用 `D:\CCDiskSageData\<用户名>`，自动迁移旧 C 盘数据与 WebView2 数据
 - 系统托盘：关闭隐藏到托盘、显示/退出菜单；扫描/清理/重复文件/手动自动清理发送 Windows 通知
+- 仪表盘可清理摘要与「去清理建议」入口；大文件支持 AI 元数据分析、打开目录、确认后移到回收站
 - 代码签名流水线：signtool + PFX/证书指纹 + 时间戳，Tauri `signCommand` 签 helper/主程序/安装包
 - NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
 
@@ -82,7 +86,7 @@ v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
 
 验证基线：
 
-- `cargo test --workspace` 通过（67 项，7 项 ignored）
+- `cargo test --workspace` 通过（69 项，7 项 ignored）
 - `npm run test` / `npm run build` 通过
 - 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证
@@ -96,6 +100,8 @@ v0.1.1 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.1.1
 - 快速扫描 release 冷缓存 4.97s / 热缓存 2.72s，结果一致
 - 清理：400 文件回收站批量清理约 1.5s 并有实时进度；永久删除 400 文件即时完成
 - 管理员扫描（UAC）：传递优化 5.1GB/55 文件、Windows 更新缓存 799MB/10,956 文件、Windows Temp 505KB/7 文件实测
+- 大文件：D 盘 600MB fixture 出现在快照；AI payload 默认掩码文件名为 `<file>` 且不含文件名；
+  确认后移到回收站成功，快照持久化移除该条目；仪表盘快速扫描摘要与跳转入口正常
 - SQLite 文件数据库跨重启 roundtrip、应用启动建库与表结构验证通过
 - 数据迁移：C 盘 `%LOCALAPPDATA%\cc-disksage`、`%APPDATA%\cc-disksage` 和 WebView2 数据已迁移到 `D:\CCDiskSageData\youda`，扫描/重复结果/审计保留
 - 最终 D 盘安装包覆盖安装后：主程序/helper 含新数据目录逻辑；C 盘旧数据目录未重建

@@ -32,6 +32,10 @@ import {
   type RiskLevel,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import {
+  clearQuickScanSummary,
+  saveQuickScanSummary,
+} from "../lib/quickScanSummary";
 
 const RISK_LABEL: Record<RiskLevel, string> = {
   safe: "安全",
@@ -749,6 +753,7 @@ export default function CleanupPage() {
           .map((finding) => finding.id),
       ),
     );
+    saveQuickScanSummary(findingsResult);
     setScanned(true);
   }
 
@@ -818,6 +823,7 @@ export default function CleanupPage() {
       setConfirmed(false);
       setPermanent(false);
       setPermanentConfirmed(false);
+      clearQuickScanSummary();
       setFindings([]);
       setSelected(new Set());
       setScanned(false);

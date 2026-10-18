@@ -65,6 +65,15 @@ src-tauri（Tauri 命令 / AppState）
 15. **托盘与通知**：启动时创建托盘图标；关闭窗口隐藏到托盘，托盘菜单显示主界面/退出。
    扫描、快速扫描、清理、重复文件扫描/删除、手动自动清理完成后通过
    `tauri-plugin-notification` 发送 Windows 通知。
+16. **仪表盘可清理摘要**：快速扫描/管理员扫描完成后，前端把安全/谨慎项汇总写入
+    WebView2 localStorage；仪表盘读取该摘要并显示「去清理建议」入口，不保存文件路径。
+17. **大文件操作**：仪表盘大文件列表使用快照 ID + 文件索引调用后端：
+    - 打开目录：解析快照条目后调用 Explorer `/select`，只读；
+    - 移到回收站：构造一个临时的 `large_file.user_selected` 候选，复用
+      `create_plan/execute_plan` 的路径、红线、reparse 校验，只进入回收站；
+      Windows/Program Files/ProgramData 由额外守卫拒绝；删除后从快照移除并持久化；
+    - AI 分析：把文件元数据构造成临时 Finding（targets 中的文件名用 `<file>` 掩码），
+      复用现有 LLM payload/校验链路；文件内容永不发送，AI 不能删除文件。
 
 ## 安全边界
 
@@ -84,7 +93,8 @@ src-tauri（Tauri 命令 / AppState）
 `llm_set_key`、
 `llm_clear_key`、`llm_test_connection`、`llm_preview_payload`、
 `llm_assess_finding`、`llm_ask_followup`、`get_auto_clean_status`、
-`set_auto_clean_config`、`run_auto_clean_now`。
+`set_auto_clean_config`、`run_auto_clean_now`、`open_large_file`、
+`delete_large_file`、`llm_preview_large_file`、`llm_assess_large_file`。
 
 ## 后续
 

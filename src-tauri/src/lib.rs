@@ -10,9 +10,11 @@ use disksage_clean::{
     AuditLog, CleanupProgress, ExecutionOptions, PlanCandidate, create_plan as build_plan,
     execute_plan as run_plan, execute_plan_with_progress as run_plan_with_progress,
 };
+use disksage_core::path_safety::is_strict_descendant;
 use disksage_core::{
-    ActionSpec, CleanupPlan, CleanupResult, DirNode, Finding, GuideId, LlmAssessment, PlanWarning,
-    Recoverability, RiskLevel, ScanPayload, ScanSnapshot, SizeProvenance, VolumeInfo, paths,
+    ActionSpec, CleanupPlan, CleanupResult, DirNode, Evidence, EvidenceKind, EvidenceSource,
+    Finding, GuideId, LargeFile, LlmAssessment, MatchedPath, PlanWarning, Recoverability,
+    RiskLevel, SampleFile, ScanPayload, ScanSnapshot, SizeProvenance, VolumeInfo, paths,
 };
 use disksage_llm::{
     LlmClient, LlmConfig, LlmPreset, PRESETS, RedactContext, build_finding_payload, delete_key,
@@ -333,6 +335,341 @@ fn get_treemap(
         file_count: snapshot.file_count,
         truncated,
     })
+}
+
+fn snapshot_large_file(
+    state: &AppState,
+    snapshot_id: &str,
+    file_index: usize,
+) -> Result<(ScanSnapshot, LargeFile), String> {
+    let snapshot = {
+        let snapshots = state
+            .snapshots
+            .lock()
+            .map_err(|_| "snapshot store lock poisoned".to_string())?;
+        snapshots.get(snapshot_id).cloned()
+    };
+    let snapshot = match snapshot {
+        Some(snapshot) => snapshot,
+        None => state
+            .storage
+            .load_scan(snapshot_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "扫描结果不存在，请重新扫描".to_string())?,
+    };
+    let file = snapshot
+        .large_files
+        .get(file_index)
+        .cloned()
+        .ok_or_else(|| "大文件条目不存在，请重新扫描".to_string())?;
+    Ok((snapshot, file))
+}
+
+/// Large-file deletion is intentionally restricted to non-system locations.
+/// The rule engine protects its own red lines; this extra guard keeps a
+/// user-selected file in Windows/Program Files from being recycled.
+fn is_system_install_tree(path: &std::path::Path, env: &HashMap<String, String>) -> bool {
+    ["WINDIR", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"]
+        .iter()
+        .filter_map(|key| env.get(*key))
+        .map(PathBuf::from)
+        .any(|root| {
+            is_strict_descendant(path, &root)
+                || path
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&root.to_string_lossy())
+        })
+}
+
+#[tauri::command]
+fn open_large_file(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+    file_index: usize,
+) -> Result<(), String> {
+    let (_snapshot, file) = snapshot_large_file(&state, &snapshot_id, file_index)?;
+    let metadata = file
+        .path
+        .symlink_metadata()
+        .map_err(|error| format!("无法读取文件：{error}"))?;
+    if !metadata.is_file() {
+        return Err("文件已不存在或不再是普通文件，请重新扫描".into());
+    }
+    let windows = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    std::process::Command::new(windows.join("explorer.exe"))
+        .arg(format!("/select,{}", file.path.display()))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn large_file_ai_finding(snapshot: &ScanSnapshot, file_index: usize) -> Result<Finding, String> {
+    let file = snapshot
+        .large_files
+        .get(file_index)
+        .ok_or_else(|| "大文件条目不存在，请重新扫描".to_string())?;
+    let metadata = file
+        .path
+        .symlink_metadata()
+        .map_err(|error| format!("无法读取文件：{error}"))?;
+    if !metadata.is_file() {
+        return Err("文件已不存在或不再是普通文件，请重新扫描".into());
+    }
+
+    let parent = file
+        .path
+        .parent()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let masked_path = format!("{}\\<file>", parent.trim_end_matches(['\\', '/']));
+    let file_name = file
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "<unknown>".into());
+    let extension = if file.extension.trim().is_empty() {
+        "(none)".to_string()
+    } else {
+        format!(".{}", file.extension)
+    };
+
+    Ok(Finding {
+        id: format!("large_file:{}:{file_index}", snapshot.id),
+        rule_id: "large_file.user_selected".into(),
+        rule_version: 1,
+        category: "large_file".into(),
+        title_zh: "大文件（用户选择）".into(),
+        title_en: "Large file (user selected)".into(),
+        risk: RiskLevel::Caution,
+        recoverability: Recoverability::RecycleBin,
+        requires_admin: false,
+        default_selected: false,
+        targets: vec![MatchedPath {
+            template: masked_path,
+            resolved: file.path.clone(),
+            bytes: file.allocated_bytes,
+            file_count: 1,
+        }],
+        allocated_bytes: file.allocated_bytes,
+        logical_bytes: file.logical_bytes,
+        file_count: 1,
+        size_provenance: SizeProvenance::Scanner,
+        oldest_mtime: file.modified_at,
+        newest_mtime: file.modified_at,
+        ext_histogram: vec![(extension.clone(), 1)],
+        sample_files: vec![SampleFile {
+            name: file_name,
+            bytes: file.allocated_bytes,
+            modified_at: file.modified_at,
+        }],
+        evidence: vec![
+            Evidence {
+                id: "E1".into(),
+                source: EvidenceSource::Scanner,
+                kind: EvidenceKind::Path,
+                claim: format!("用户在大文件列表中手动选择的文件，所在目录：{parent}"),
+                path: Some(file.path.clone()),
+                bytes: None,
+                timestamp: None,
+                rule_id: None,
+                confidence: 1.0,
+            },
+            Evidence {
+                id: "E2".into(),
+                source: EvidenceSource::Scanner,
+                kind: EvidenceKind::Size,
+                claim: "分配大小与逻辑大小由本地扫描器提供。".into(),
+                path: None,
+                bytes: Some(file.allocated_bytes),
+                timestamp: None,
+                rule_id: None,
+                confidence: 1.0,
+            },
+            Evidence {
+                id: "E3".into(),
+                source: EvidenceSource::Scanner,
+                kind: EvidenceKind::Age,
+                claim: "最近修改时间由本地扫描器提供。".into(),
+                path: None,
+                bytes: None,
+                timestamp: file.modified_at,
+                rule_id: None,
+                confidence: 1.0,
+            },
+            Evidence {
+                id: "E4".into(),
+                source: EvidenceSource::Scanner,
+                kind: EvidenceKind::FileType,
+                claim: format!("文件扩展名为 {extension}。"),
+                path: None,
+                bytes: None,
+                timestamp: None,
+                rule_id: None,
+                confidence: 1.0,
+            },
+            Evidence {
+                id: "E5".into(),
+                source: EvidenceSource::Scanner,
+                kind: EvidenceKind::SafetyCheck,
+                claim: "该候选不来自规则缓存；删除默认进入回收站，AI 只提供建议，不能删除文件。"
+                    .into(),
+                path: None,
+                bytes: None,
+                timestamp: None,
+                rule_id: None,
+                confidence: 1.0,
+            },
+        ],
+        consequence:
+            "这是用户手动选择的大文件，不是规则匹配的缓存。删除会进入回收站；是否安全取决于文件用途。"
+                .into(),
+        action: ActionSpec::Trash,
+        llm: None,
+    })
+}
+
+#[tauri::command]
+fn llm_preview_large_file(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+    file_index: usize,
+) -> Result<serde_json::Value, String> {
+    let (snapshot, _) = snapshot_large_file(&state, &snapshot_id, file_index)?;
+    let finding = large_file_ai_finding(&snapshot, file_index)?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
+    let redact = RedactContext::from_env(config.redact_paths);
+    Ok(payload_json(&build_finding_payload(
+        &finding, &config, &redact,
+    )))
+}
+
+#[tauri::command]
+async fn llm_assess_large_file(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+    file_index: usize,
+) -> Result<LlmAssessment, String> {
+    let (snapshot, _) = snapshot_large_file(&state, &snapshot_id, file_index)?;
+    let finding = large_file_ai_finding(&snapshot, file_index)?;
+    let config = LlmConfig::load(&paths::llm_config_path()).map_err(|error| error.to_string())?;
+    let key = get_key(&config.provider_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "请先在设置中保存 API Key".to_string())?;
+    let client = LlmClient::new(config, key).map_err(|error| error.to_string())?;
+    client
+        .assess_finding(&finding)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+struct LargeFileDeleteResponse {
+    snapshot: ScanSnapshot,
+    result: CleanupResult,
+}
+
+#[tauri::command]
+async fn delete_large_file(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+    file_index: usize,
+    confirmed: bool,
+) -> Result<LargeFileDeleteResponse, String> {
+    if !confirmed {
+        return Err("请先确认要移到回收站的文件".into());
+    }
+    let (mut snapshot, file) = snapshot_large_file(&state, &snapshot_id, file_index)?;
+    let metadata = file
+        .path
+        .symlink_metadata()
+        .map_err(|error| format!("无法读取文件：{error}"))?;
+    if !metadata.is_file() {
+        return Err("文件已不存在或不再是普通文件，请重新扫描".into());
+    }
+
+    let env: HashMap<String, String> = std::env::vars().collect();
+    if is_system_install_tree(&file.path, &env) {
+        return Err("Windows/Program Files/ProgramData 中的文件不允许通过大文件清理删除".into());
+    }
+    let parent = file
+        .path
+        .parent()
+        .ok_or_else(|| "无法确定文件所在目录".to_string())?
+        .to_path_buf();
+    let candidate = PlanCandidate {
+        finding_id: format!("large_file:{snapshot_id}:{file_index}"),
+        rule_id: "large_file.user_selected".into(),
+        title_zh: "大文件（用户选择）".into(),
+        risk: RiskLevel::Caution,
+        recoverability: Recoverability::RecycleBin,
+        requires_admin: false,
+        action: ActionSpec::Trash,
+        files: vec![file.path.clone()],
+        allowed_roots: vec![parent],
+    };
+
+    let plan_env = env.clone();
+    let plan = tauri::async_runtime::spawn_blocking(move || build_plan(vec![candidate], &plan_env))
+        .await
+        .map_err(|error| format!("plan task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+
+    let exec_env = env;
+    let audit_path = AuditLog::default_location();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let audit = AuditLog::new(audit_path);
+        run_plan(
+            &plan,
+            &exec_env,
+            ExecutionOptions {
+                confirm: true,
+                dry_run: false,
+                elevation: false,
+            },
+            Some(&audit),
+        )
+    })
+    .await
+    .map_err(|error| format!("cleanup task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+
+    if result.deleted == 0 {
+        return Err(result
+            .failed
+            .first()
+            .map(|(_, message)| message.clone())
+            .unwrap_or_else(|| "文件未能移到回收站，可能已被占用".into()));
+    }
+
+    snapshot.large_files.retain(|entry| entry.path != file.path);
+    if let Some(volume) = disksage_scan::enumerate_volumes()
+        .into_iter()
+        .find(|volume| volume.letter == snapshot.volume)
+    {
+        snapshot.free_bytes = volume.free_bytes;
+    }
+    state
+        .snapshots
+        .lock()
+        .map_err(|_| "snapshot store lock poisoned".to_string())?
+        .insert(snapshot.id.clone(), snapshot.clone());
+    if let Err(error) = state.storage.save_scan(&snapshot) {
+        eprintln!("failed to persist snapshot after large-file deletion: {error}");
+    }
+
+    notify(
+        &app,
+        "大文件已移到回收站",
+        format!(
+            "{} · {}",
+            file.path.display(),
+            format_bytes_short(file.allocated_bytes)
+        ),
+    );
+    Ok(LargeFileDeleteResponse { snapshot, result })
 }
 
 #[tauri::command]
@@ -1741,7 +2078,11 @@ pub fn run() {
             cancel_duplicate_scan,
             get_latest_duplicate_scan,
             delete_duplicate_files,
-            open_duplicate_file
+            open_duplicate_file,
+            open_large_file,
+            delete_large_file,
+            llm_preview_large_file,
+            llm_assess_large_file
         ])
         .run(context)
         .expect("error while running tauri application");
@@ -1750,6 +2091,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
 
     fn node(name: &str, bytes: u64, children: Vec<DirNode>) -> DirNode {
@@ -1877,5 +2219,78 @@ mod tests {
         let summary = prune_snapshot(&snapshot);
         assert_eq!(summary.top_dirs.len(), 50);
         assert_eq!(summary.large_files.len(), 200);
+    }
+
+    #[test]
+    fn large_file_ai_payload_hides_file_name_by_default() {
+        let temp = std::env::temp_dir().join(format!("ccds-large-{}", Uuid::new_v4()));
+        fs::create_dir_all(&temp).unwrap();
+        let path = temp.join("secret-video.iso");
+        fs::write(&path, b"fixture").unwrap();
+        let snapshot = ScanSnapshot {
+            id: "snap-ai".into(),
+            volume: 'C',
+            large_files: vec![LargeFile {
+                path: path.clone(),
+                allocated_bytes: 7,
+                logical_bytes: 7,
+                modified_at: Some(1_700_000_000),
+                extension: "iso".into(),
+            }],
+            ..ScanSnapshot::default()
+        };
+
+        let finding = large_file_ai_finding(&snapshot, 0).unwrap();
+        assert_eq!(finding.title_zh, "大文件（用户选择）");
+        assert!(finding.targets[0].template.ends_with("<file>"));
+        assert_eq!(finding.sample_files.len(), 1);
+
+        let config = LlmConfig::default();
+        let redact = RedactContext::from_env(true);
+        let payload = build_finding_payload(&finding, &config, &redact);
+        let json = serde_json::to_string(&payload_json(&payload)).unwrap();
+        assert!(!json.contains("secret-video"));
+        assert!(json.contains("<file>"));
+
+        let with_name = LlmConfig {
+            send_sample_names: true,
+            sample_name_limit: 10,
+            ..LlmConfig::default()
+        };
+        let payload = build_finding_payload(&finding, &with_name, &redact);
+        let json = serde_json::to_string(&payload_json(&payload)).unwrap();
+        assert!(json.contains("secret-video.iso"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn large_file_deletion_rejects_system_install_trees() {
+        let mut env = HashMap::new();
+        env.insert("WINDIR".into(), r"C:\Windows".into());
+        env.insert("ProgramFiles".into(), r"C:\Program Files".into());
+        env.insert("ProgramFiles(x86)".into(), r"C:\Program Files (x86)".into());
+        env.insert("ProgramData".into(), r"C:\ProgramData".into());
+
+        assert!(is_system_install_tree(
+            std::path::Path::new(r"C:\Windows\System32\large.dll"),
+            &env
+        ));
+        assert!(is_system_install_tree(
+            std::path::Path::new(r"C:\Program Files\Game\large.bin"),
+            &env
+        ));
+        assert!(is_system_install_tree(
+            std::path::Path::new(r"C:\ProgramData\Vendor\large.bin"),
+            &env
+        ));
+        assert!(!is_system_install_tree(
+            std::path::Path::new(r"C:\Users\me\Downloads\large.iso"),
+            &env
+        ));
+        assert!(!is_system_install_tree(
+            std::path::Path::new(r"D:\VMs\disk.vhdx"),
+            &env
+        ));
     }
 }

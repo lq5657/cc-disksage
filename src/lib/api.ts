@@ -361,6 +361,44 @@ export async function executePlan(
   });
 }
 
+export interface LargeFileDeleteResponse {
+  snapshot: ScanSnapshot;
+  result: CleanupResult;
+}
+
+export async function openLargeFile(
+  snapshotId: string,
+  fileIndex: number,
+): Promise<void> {
+  return invoke("open_large_file", { snapshotId, fileIndex });
+}
+
+export async function deleteLargeFile(
+  snapshotId: string,
+  fileIndex: number,
+  confirmed: boolean,
+): Promise<LargeFileDeleteResponse> {
+  return invoke<LargeFileDeleteResponse>("delete_large_file", {
+    snapshotId,
+    fileIndex,
+    confirmed,
+  });
+}
+
+export async function llmPreviewLargeFile(
+  snapshotId: string,
+  fileIndex: number,
+): Promise<unknown> {
+  return invoke<unknown>("llm_preview_large_file", { snapshotId, fileIndex });
+}
+
+export async function llmAssessLargeFile(
+  snapshotId: string,
+  fileIndex: number,
+): Promise<LlmAssessment> {
+  return invoke<LlmAssessment>("llm_assess_large_file", { snapshotId, fileIndex });
+}
+
 export interface LlmPreset {
   id: string;
   name_zh: string;

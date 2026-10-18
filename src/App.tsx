@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
   ChevronRight,
   Copy,
-  FileArchive,
   Gauge,
   HardDrive,
   History,
@@ -25,7 +24,9 @@ import {
   type ScanSnapshot,
   type VolumeInfo,
 } from "./lib/api";
+import LargeFilesPanel from "./components/LargeFilesPanel";
 import { formatBytes, formatPercent } from "./lib/format";
+import { loadQuickScanSummary } from "./lib/quickScanSummary";
 import CleanupPage from "./pages/CleanupPage";
 import DuplicatesPage from "./pages/DuplicatesPage";
 import ExplorePage from "./pages/ExplorePage";
@@ -147,47 +148,6 @@ function TopDirs({ snapshot }: { snapshot: ScanSnapshot }) {
   );
 }
 
-function LargeFiles({ snapshot }: { snapshot: ScanSnapshot }) {
-  const files = snapshot.large_files.slice(0, 10);
-  return (
-    <section className="rounded-2xl border border-emerald-900/10 bg-white p-5 dark:border-emerald-100/10 dark:bg-emerald-950/40">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold">大文件</h3>
-          <p className="text-xs text-emerald-900/50 dark:text-emerald-100/50">
-            超过 500MB 的文件，按占用排序
-          </p>
-        </div>
-        <FileArchive className="h-5 w-5 text-emerald-700/60 dark:text-emerald-300/60" />
-      </div>
-      <div className="mt-4 divide-y divide-emerald-900/10 text-sm dark:divide-emerald-100/10">
-        {files.length === 0 ? (
-          <p className="py-3 text-emerald-900/55 dark:text-emerald-100/55">
-            未发现超过阈值的大文件。
-          </p>
-        ) : (
-          files.map((file) => (
-            <div key={file.path} className="flex items-center justify-between gap-4 py-2.5">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{file.path}</div>
-                <div className="text-xs text-emerald-900/45 dark:text-emerald-100/45">
-                  {file.extension ? `.${file.extension}` : "无扩展名"}
-                  {file.modified_at
-                    ? ` · ${new Date(file.modified_at * 1000).toLocaleDateString("zh-CN")}`
-                    : ""}
-                </div>
-              </div>
-              <span className="shrink-0 text-emerald-900/60 dark:text-emerald-100/60">
-                {formatBytes(file.allocated_bytes)}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
-
 function Dashboard({
   volume,
   snapshot,
@@ -198,6 +158,8 @@ function Dashboard({
   onScan,
   onMftScan,
   onCancel,
+  onOpenCleanup,
+  onSnapshotChange,
 }: {
   volume: VolumeInfo;
   snapshot: ScanSnapshot | null;
@@ -208,10 +170,13 @@ function Dashboard({
   onScan: () => void;
   onMftScan: () => void;
   onCancel: () => void;
+  onOpenCleanup: () => void;
+  onSnapshotChange: (snapshot: ScanSnapshot) => void;
 }) {
   const displayVolume = snapshot
     ? { ...volume, free_bytes: snapshot.free_bytes }
     : volume;
+  const quickSummary = useMemo(() => loadQuickScanSummary(), []);
 
   return (
     <div className="space-y-5">
@@ -333,10 +298,52 @@ function Dashboard({
         ) : null}
       </section>
 
+      <section className="rounded-2xl border border-emerald-900/10 bg-white p-5 shadow-sm dark:border-emerald-100/10 dark:bg-emerald-950/40">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
+              <h3 className="font-semibold">可清理项</h3>
+            </div>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-emerald-900/60 dark:text-emerald-100/60">
+              全盘扫描只做空间分析，不会直接删除文件。清理前请在「清理建议」执行规则扫描；
+              每一项都有规则来源、红线校验和证据链。
+            </p>
+            {quickSummary ? (
+              <p className="mt-2 text-sm text-emerald-900/70 dark:text-emerald-100/70">
+                上次快速扫描：安全项{" "}
+                <strong>{formatBytes(quickSummary.safe_bytes)}</strong>（
+                {quickSummary.safe_count} 项）· 谨慎项{" "}
+                {formatBytes(quickSummary.caution_bytes)}（
+                {quickSummary.caution_count} 项）·{" "}
+                {new Date(quickSummary.scanned_at * 1000).toLocaleString(
+                  "zh-CN",
+                )}
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-emerald-900/55 dark:text-emerald-100/55">
+                还没有快速扫描记录。
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onOpenCleanup}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-emerald-700/30 px-4 py-2 text-sm font-medium text-emerald-800 transition hover:bg-emerald-50 dark:border-emerald-300/30 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+          >
+            去清理建议
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </section>
+
       {snapshot ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <TopDirs snapshot={snapshot} />
-          <LargeFiles snapshot={snapshot} />
+          <LargeFilesPanel
+            snapshot={snapshot}
+            onSnapshotChange={onSnapshotChange}
+          />
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
@@ -606,6 +613,8 @@ export default function App() {
               onScan={handleScan}
               onMftScan={handleMftScan}
               onCancel={handleCancelScan}
+              onOpenCleanup={() => setActive("cleanup")}
+              onSnapshotChange={(next) => setSnapshot(next)}
             />
           ) : active === "cleanup" ? (
             <CleanupPage />

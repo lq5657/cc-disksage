@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "cc-disksage"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-clean"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "disksage-core",
@@ -1065,7 +1065,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-helper"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1094,7 +1094,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-llm"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-rules"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "disksage-core",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "disksage-scan"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "disksage-core",
