@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use disksage_core::path_safety::{
-    expand_env, is_forbidden_delete_target, is_strict_descendant, is_system_red_line,
+    DeleteGuard, expand_env, is_forbidden_delete_target, is_strict_descendant, is_system_red_line,
 };
 use disksage_core::{ActionSpec, EnvMap, GuideId};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -42,10 +42,20 @@ pub struct CompiledRule {
     pub action: ActionSpec,
 }
 
+/// A matched file with the metadata already collected during the walk. This
+/// avoids a second `metadata` call (or several) while building the finding.
+#[derive(Debug, Clone)]
+pub(crate) struct MatchedFile {
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub modified_at: Option<i64>,
+    pub target_index: usize,
+}
+
 impl CompiledRule {
     /// Walk all targets and return the exact files that match this rule.
     /// The result is deduplicated and sorted so plans are deterministic.
-    pub fn matched_files(&self, env: &EnvMap) -> Vec<(PathBuf, u64)> {
+    pub(crate) fn matched_files(&self, guard: &DeleteGuard) -> Vec<MatchedFile> {
         let cutoff = if self.rule.min_age_days == 0 {
             None
         } else {
@@ -56,16 +66,22 @@ impl CompiledRule {
 
         let mut seen = HashSet::new();
         let mut files = Vec::new();
-        for target in &self.targets {
-            for (path, bytes) in walk_target(target, env, cutoff) {
-                if seen.insert(path.clone()) {
-                    files.push((path, bytes));
+        for (target_index, target) in self.targets.iter().enumerate() {
+            for file in walk_target(target, target_index, guard, cutoff) {
+                if seen.insert(file.path.clone()) {
+                    files.push(file);
                 }
             }
         }
-        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files.sort_by(|a, b| a.path.cmp(&b.path));
         files
     }
+}
+
+fn system_time_to_timestamp(time: SystemTime) -> Option<i64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
 }
 
 pub fn compile_rules(
@@ -155,10 +171,7 @@ fn build_glob_set(patterns: &[String]) -> Result<GlobSet, RuleError> {
     Ok(builder.build()?)
 }
 
-fn is_reparse(path: &Path) -> bool {
-    let Ok(metadata) = path.symlink_metadata() else {
-        return true;
-    };
+fn is_reparse_metadata(metadata: &std::fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
@@ -167,6 +180,13 @@ fn is_reparse(path: &Path) -> bool {
     {
         metadata.file_type().is_symlink()
     }
+}
+
+fn is_reparse(path: &Path) -> bool {
+    let Ok(metadata) = path.symlink_metadata() else {
+        return true;
+    };
+    is_reparse_metadata(&metadata)
 }
 
 fn should_skip_dir(path: &Path) -> bool {
@@ -188,9 +208,10 @@ fn to_slash(relative: &Path) -> String {
 
 fn walk_target(
     target: &CompiledTarget,
-    env: &EnvMap,
+    target_index: usize,
+    guard: &DeleteGuard,
     age_cutoff: Option<SystemTime>,
-) -> Vec<(PathBuf, u64)> {
+) -> Vec<MatchedFile> {
     let mut files = Vec::new();
 
     let walker = WalkDir::new(&target.root)
@@ -203,13 +224,20 @@ fn walk_target(
         if !entry.file_type().is_file() {
             continue;
         }
-        let path = entry.path();
-        if is_reparse(path) {
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        if is_reparse_metadata(&metadata) {
             continue;
         }
+        let path = entry.path();
         let Ok(relative) = path.strip_prefix(&target.root) else {
             continue;
         };
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
         let relative_slash = to_slash(relative);
         if !target.match_all && !target.include.is_match(&relative_slash) {
             continue;
@@ -217,24 +245,23 @@ fn walk_target(
         if target.exclude.is_match(&relative_slash) {
             continue;
         }
-        if is_system_red_line(path, env) || is_forbidden_delete_target(path, env) {
+        if guard.rejects_delete_target(path) {
             continue;
         }
-        if !is_strict_descendant(path, &target.root) {
-            continue;
-        }
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
-        };
+        let modified = metadata.modified().ok();
         if let Some(cutoff) = age_cutoff {
-            match metadata.modified() {
-                Ok(modified) if modified > cutoff => continue,
-                Err(_) => continue,
+            match modified {
+                Some(modified) if modified > cutoff => continue,
+                None => continue,
                 _ => {}
             }
         }
-        files.push((path.to_path_buf(), metadata.len()));
+        files.push(MatchedFile {
+            path: path.to_path_buf(),
+            bytes: metadata.len(),
+            modified_at: modified.and_then(system_time_to_timestamp),
+            target_index,
+        });
     }
 
     files

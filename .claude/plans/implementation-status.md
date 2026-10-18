@@ -20,13 +20,15 @@
 | 自动清理 | `--auto-clean` 无窗口模式、安全默认可重建非管理员规则过滤、低空间阈值、Task Scheduler 注册/删除、设置页、独立 JSONL 日志、卸载钩子删除任务 |
 | MFT 秒扫 | `ntfs-reader` 分块读取 `$MFT`、路径/目录聚合、跳过 reparse/系统元数据、UAC helper job、快照回读、仪表盘入口 |
 | 重复文件 | 大小 → 首尾 64KB BLAKE3 → 完整 BLAKE3、多硬链接文件排除、用户内容目录 scope、结果仅内存、回收站删除（至少保留一个）、ID-only IPC |
+| 快速扫描性能 | 单次遍历复用 metadata、缓存红线路径、按目标索引统计、rayon 并行规则；release 冷 4.97s / 热 2.72s |
+| SQLite 持久化 | bundled SQLite；保存扫描摘要/重复结果/扫描历史；启动恢复最近结果；保留最近 20 次；`src-tauri/storage.rs` |
 | 代码签名 | `sign-binary.ps1`、`sign-installers.ps1`、`tauri.signed.conf.json`、`sign-command.ps1`、PFX/指纹/时间戳、Tauri signCommand 签名 helper/主程序/安装包 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
 
-- `cargo test --workspace`：通过（59 项，6 个 ignored）
+- `cargo test --workspace`：通过（63 项，6 个 ignored）
 - `cargo clippy --workspace --all-targets -- -D warnings`：通过
 - `npm run test`：3 项通过
 - `npm run build`：通过
@@ -42,6 +44,8 @@
 - **重复文件真实删除 fixture**：临时目录中保留一个副本、删除另一个到回收站；验证保留文件存在、目标消失、审计写入
 - **管理员 helper 清理（UAC）**：Windows Temp + 机器级 WER + Minidump，删除 233 个文件 / 约 160 MiB；3 个被占用文件按失败返回，审计 elevation=true
 - **DISM Analyze（UAC，只读）**：退出码 3010（需要重启），组件存储实际 23.44GB、备份/禁用功能 15.30GB、11 个可回收包、建议清理；已修复 DISM 在隐藏重启提示处卡死的问题（`/NoRestart` + 15 分钟超时）
+- 快速扫描优化：release 全规则（含管理员）冷缓存 4.97s、热缓存 2.72s，19 个候选项，大小/文件数与优化前一致
+- SQLite：内存与文件数据库 roundtrip、重启读取、扫描历史排序通过；实际应用启动创建 `disksage.db`（`scans`、`duplicate_scans`，user_version=1）
 - 代码签名：临时自签名证书 + 临时受信任根完成签名/验签；Tauri `signCommand` 构建 lite 包时成功签名 helper、主程序与安装包，`Get-AuthenticodeSignature` 为 Valid（测试证书已清理）；**按用户决定暂不用于发布**
 - 回收站删除 API：真机通过
 - Windows Credential Manager roundtrip：真机通过
@@ -54,12 +58,13 @@
 ## 未完成（下一阶段）
 
 1. 自动清理的真实到点运行与托盘通知（需在 VM 或用户确认后验证，可能删除真实缓存；目前只验证了未启用/阈值跳过）。
-2. 重复文件删除的 Tauri UI 点击流程（核心 fixture 删除已验证，UI 尚未手工点通）。
+2. 重启后恢复最近扫描/重复结果与历史页扫描列表的 UI 点击流程（存储层已验证）。
+3. 重复文件删除的 Tauri UI 点击流程（核心 fixture 删除已验证，UI 尚未手工点通）。
 3. 系统引导项点击流程（Windows.old/还原点/分页文件/回收站）与干净 Win10 断网安装。
-4. SQLite 快照持久化（当前快照与重复结果在进程内存，重启丢失）。
-5. 自动更新、per-machine 安装变体、便携版。
-6. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
-7. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
+4. 自动更新、per-machine 安装变体、便携版。
+5. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
+6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
+7. 扫描快照只持久化前 3 层摘要；如果后续需要深层下钻，再改存压缩的完整树。
 
 ## 已知限制
 
@@ -69,6 +74,8 @@
 - 管理员 Temp/WER/Minidump 清理实测 3 个占用文件返回失败；文件动作使用回收站，`freed_bytes` 更接近“已处理字节”，不一定立即反映磁盘可用空间。
 - DISM 操作可能返回 3010（需要重启），不会自动重启；超时 15 分钟会终止并提示检查 `dism.log`。
 - treemap 使用逻辑大小；硬链接/稀疏文件的分配大小精确统计属于后续优化。
+- SQLite 只保存扫描摘要（前 3 层目录），不是完整目录树；当前 treemap 下钻深度与之一致。
+- SQLite 每个表保留最近 20 条；重复文件结果含本地路径，删除 `disksage.db` 可清空。
 - 重复文件默认只扫描文档/下载/图片/视频/桌面；不扫描 AppData 与应用内部目录，可能漏掉部分重复项。
 - 重复扫描会读取候选文件内容做哈希；结果仅保存在内存，重启后需重新扫描。
 - 自动清理只在计划任务触发时检查低空间阈值，不是常驻监控；任务仅在用户登录时运行。

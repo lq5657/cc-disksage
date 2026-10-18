@@ -136,6 +136,32 @@ export async function scanVolumeMft(volume: string): Promise<ScanSnapshot> {
   return invoke<ScanSnapshot>("scan_volume_mft", { volume });
 }
 
+export interface ScanHistoryEntry {
+  id: string;
+  volume: string;
+  engine: string;
+  started_at: number;
+  duration_ms: number;
+  file_count: number;
+  dir_count: number;
+  allocated_bytes: number;
+  free_bytes: number;
+  error_count: number;
+  node_limit_hit: boolean;
+}
+
+export async function getLatestScan(): Promise<ScanSnapshot | null> {
+  return invoke<ScanSnapshot | null>("get_latest_scan");
+}
+
+export async function getScanHistory(limit = 20): Promise<ScanHistoryEntry[]> {
+  return invoke<ScanHistoryEntry[]>("get_scan_history", { limit });
+}
+
+export async function getLatestDuplicateScan(): Promise<DuplicateScanResult | null> {
+  return invoke<DuplicateScanResult | null>("get_latest_duplicate_scan");
+}
+
 export interface DuplicateScanProgress {
   phase: string;
   files_seen: number;

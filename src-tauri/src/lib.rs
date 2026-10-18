@@ -1,4 +1,5 @@
 mod auto_clean;
+mod storage;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ use disksage_scan::{
     find_duplicates, scan_volume as run_scan,
 };
 use serde::Serialize;
+use storage::{ScanHistoryEntry, Storage};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -30,7 +32,6 @@ struct StoredFinding {
     files: Vec<PathBuf>,
 }
 
-#[derive(Default)]
 struct AppState {
     findings: Mutex<HashMap<String, StoredFinding>>,
     plans: Mutex<HashMap<String, CleanupPlan>>,
@@ -39,6 +40,22 @@ struct AppState {
     scan_cancel: Mutex<Option<CancelToken>>,
     duplicate_scans: Mutex<HashMap<String, DuplicateScanResult>>,
     duplicate_cancel: Mutex<Option<CancelToken>>,
+    storage: Storage,
+}
+
+impl AppState {
+    fn new(storage: Storage) -> Self {
+        Self {
+            findings: Mutex::new(HashMap::new()),
+            plans: Mutex::new(HashMap::new()),
+            assessments: Mutex::new(HashMap::new()),
+            snapshots: Mutex::new(HashMap::new()),
+            scan_cancel: Mutex::new(None),
+            duplicate_scans: Mutex::new(HashMap::new()),
+            duplicate_cancel: Mutex::new(None),
+            storage,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -239,7 +256,10 @@ async fn scan_volume(
         .snapshots
         .lock()
         .map_err(|_| "snapshot store lock poisoned".to_string())?
-        .insert(snapshot.id.clone(), snapshot);
+        .insert(summary.id.clone(), summary.clone());
+    if let Err(error) = state.storage.save_scan(&summary) {
+        eprintln!("failed to persist scan: {error}");
+    }
     Ok(summary)
 }
 
@@ -261,13 +281,21 @@ fn get_treemap(
     state: tauri::State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<TreemapResponse, String> {
-    let snapshots = state
-        .snapshots
-        .lock()
-        .map_err(|_| "snapshot store lock poisoned".to_string())?;
-    let snapshot = snapshots
-        .get(&snapshot_id)
-        .ok_or_else(|| "snapshot not found; run a full scan first".to_string())?;
+    let snapshot = {
+        let snapshots = state
+            .snapshots
+            .lock()
+            .map_err(|_| "snapshot store lock poisoned".to_string())?;
+        snapshots.get(&snapshot_id).cloned()
+    };
+    let snapshot = match snapshot {
+        Some(snapshot) => snapshot,
+        None => state
+            .storage
+            .load_scan(&snapshot_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "snapshot not found; run a full scan first".to_string())?,
+    };
 
     let mut budget = 2500usize;
     let mut truncated = false;
@@ -289,6 +317,42 @@ fn get_treemap(
         file_count: snapshot.file_count,
         truncated,
     })
+}
+
+#[tauri::command]
+fn get_latest_scan(state: tauri::State<'_, AppState>) -> Result<Option<ScanSnapshot>, String> {
+    let snapshot = state.storage.latest_scan()?;
+    if let Some(snapshot) = &snapshot {
+        state
+            .snapshots
+            .lock()
+            .map_err(|_| "snapshot store lock poisoned".to_string())?
+            .insert(snapshot.id.clone(), snapshot.clone());
+    }
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn get_scan_history(
+    state: tauri::State<'_, AppState>,
+    limit: usize,
+) -> Result<Vec<ScanHistoryEntry>, String> {
+    state.storage.scan_history(limit)
+}
+
+#[tauri::command]
+fn get_latest_duplicate_scan(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<DuplicateScanResult>, String> {
+    let result = state.storage.latest_duplicate_scan()?;
+    if let Some(result) = &result {
+        state
+            .duplicate_scans
+            .lock()
+            .map_err(|_| "duplicate store lock poisoned".to_string())?
+            .insert(result.scan_id.clone(), result.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -730,7 +794,10 @@ async fn scan_volume_mft(
         .snapshots
         .lock()
         .map_err(|_| "snapshot store lock poisoned".to_string())?
-        .insert(snapshot.id.clone(), snapshot);
+        .insert(summary.id.clone(), summary.clone());
+    if let Err(error) = state.storage.save_scan(&summary) {
+        eprintln!("failed to persist MFT scan: {error}");
+    }
     Ok(summary)
 }
 
@@ -797,12 +864,17 @@ async fn find_duplicate_files(
     }
     let result = result?.map_err(|error| error.to_string())?;
 
-    let mut store = state
-        .duplicate_scans
-        .lock()
-        .map_err(|_| "duplicate store lock poisoned".to_string())?;
-    store.clear();
-    store.insert(result.scan_id.clone(), result.clone());
+    {
+        let mut store = state
+            .duplicate_scans
+            .lock()
+            .map_err(|_| "duplicate store lock poisoned".to_string())?;
+        store.clear();
+        store.insert(result.scan_id.clone(), result.clone());
+    }
+    if let Err(error) = state.storage.save_duplicate_scan(&result) {
+        eprintln!("failed to persist duplicate scan: {error}");
+    }
     Ok(result)
 }
 
@@ -840,41 +912,33 @@ async fn delete_duplicate_files(
         return Err("删除列表无效".into());
     }
 
-    let (roots, selected_paths) = {
-        let store = state
-            .duplicate_scans
-            .lock()
-            .map_err(|_| "duplicate store lock poisoned".to_string())?;
-        let scan = store
-            .get(&scan_id)
-            .ok_or_else(|| "重复扫描结果已失效，请重新扫描".to_string())?;
-        let group = scan
-            .groups
+    let scan = duplicate_scan_from_state(&state, &scan_id)?;
+    let group = scan
+        .groups
+        .iter()
+        .find(|group| group.id == group_id)
+        .ok_or_else(|| "重复文件组已失效，请重新扫描".to_string())?;
+    if !group.files.iter().any(|file| file.id == keep_file_id) {
+        return Err("保留文件不在该组中".into());
+    }
+    let mut selected_paths = Vec::new();
+    for file_id in &delete_file_ids {
+        let file = group
+            .files
             .iter()
-            .find(|group| group.id == group_id)
-            .ok_or_else(|| "重复文件组已失效，请重新扫描".to_string())?;
-        if !group.files.iter().any(|file| file.id == keep_file_id) {
-            return Err("保留文件不在该组中".into());
+            .find(|file| file.id == *file_id)
+            .ok_or_else(|| "删除文件不在该组中".to_string())?;
+        let metadata = std::fs::metadata(&file.path)
+            .map_err(|error| format!("无法读取 {}：{error}", file.path.display()))?;
+        if metadata.len() != group.size {
+            return Err(format!(
+                "{} 在扫描后已变化，请重新扫描后再删除",
+                file.path.display()
+            ));
         }
-        let mut paths = Vec::new();
-        for file_id in &delete_file_ids {
-            let file = group
-                .files
-                .iter()
-                .find(|file| file.id == *file_id)
-                .ok_or_else(|| "删除文件不在该组中".to_string())?;
-            let metadata = std::fs::metadata(&file.path)
-                .map_err(|error| format!("无法读取 {}：{error}", file.path.display()))?;
-            if metadata.len() != group.size {
-                return Err(format!(
-                    "{} 在扫描后已变化，请重新扫描后再删除",
-                    file.path.display()
-                ));
-            }
-            paths.push(file.path.clone());
-        }
-        (scan.roots.clone(), paths)
-    };
+        selected_paths.push(file.path.clone());
+    }
+    let roots = scan.roots.clone();
 
     let env: HashMap<String, String> = std::env::vars().collect();
     let candidate = PlanCandidate {
@@ -908,17 +972,27 @@ async fn delete_duplicate_files(
     .await
     .map_err(|error| format!("duplicate delete task failed: {error}"))??;
 
-    let mut store = state
-        .duplicate_scans
-        .lock()
-        .map_err(|_| "duplicate store lock poisoned".to_string())?;
-    if let Some(scan) = store.get_mut(&scan_id) {
-        scan.groups.retain(|group| group.id != group_id);
-        scan.total_wasted_bytes = scan
-            .groups
-            .iter()
-            .map(|group| group.wasted_bytes)
-            .fold(0, u64::saturating_add);
+    let updated = {
+        let mut store = state
+            .duplicate_scans
+            .lock()
+            .map_err(|_| "duplicate store lock poisoned".to_string())?;
+        if let Some(scan) = store.get_mut(&scan_id) {
+            scan.groups.retain(|group| group.id != group_id);
+            scan.total_wasted_bytes = scan
+                .groups
+                .iter()
+                .map(|group| group.wasted_bytes)
+                .fold(0, u64::saturating_add);
+            Some(scan.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(scan) = updated
+        && let Err(error) = state.storage.save_duplicate_scan(&scan)
+    {
+        eprintln!("failed to persist updated duplicate scan: {error}");
     }
     Ok(result)
 }
@@ -929,21 +1003,14 @@ fn open_duplicate_file(
     scan_id: String,
     file_id: String,
 ) -> Result<(), String> {
-    let path = {
-        let store = state
-            .duplicate_scans
-            .lock()
-            .map_err(|_| "duplicate store lock poisoned".to_string())?;
-        let scan = store
-            .get(&scan_id)
-            .ok_or_else(|| "重复扫描结果已失效，请重新扫描".to_string())?;
-        scan.groups
-            .iter()
-            .flat_map(|group| group.files.iter())
-            .find(|file| file.id == file_id)
-            .map(|file| file.path.clone())
-            .ok_or_else(|| "文件已不在扫描结果中".to_string())?
-    };
+    let scan = duplicate_scan_from_state(&state, &scan_id)?;
+    let path = scan
+        .groups
+        .iter()
+        .flat_map(|group| group.files.iter())
+        .find(|file| file.id == file_id)
+        .map(|file| file.path.clone())
+        .ok_or_else(|| "文件已不在扫描结果中".to_string())?;
     let windows = std::env::var_os("WINDIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
@@ -999,6 +1066,31 @@ fn launch_elevated_helper(helper: &std::path::Path, job: &std::path::Path) -> Re
 #[cfg(not(windows))]
 fn launch_elevated_helper(_helper: &std::path::Path, _job: &std::path::Path) -> Result<(), String> {
     Err("elevated cleanup is only supported on Windows".into())
+}
+
+fn duplicate_scan_from_state(
+    state: &AppState,
+    scan_id: &str,
+) -> Result<DuplicateScanResult, String> {
+    if let Some(scan) = state
+        .duplicate_scans
+        .lock()
+        .map_err(|_| "duplicate store lock poisoned".to_string())?
+        .get(scan_id)
+        .cloned()
+    {
+        return Ok(scan);
+    }
+    let scan = state
+        .storage
+        .load_duplicate_scan(scan_id)?
+        .ok_or_else(|| "重复扫描结果已失效，请重新扫描".to_string())?;
+    state
+        .duplicate_scans
+        .lock()
+        .map_err(|_| "duplicate store lock poisoned".to_string())?
+        .insert(scan_id.to_string(), scan.clone());
+    Ok(scan)
 }
 
 fn stored_finding(state: &AppState, finding_id: &str) -> Result<Finding, String> {
@@ -1163,13 +1255,23 @@ pub fn run() {
         std::process::exit(exit_code);
     }
 
+    let storage = match Storage::open_default() {
+        Ok(storage) => storage,
+        Err(error) => {
+            eprintln!("failed to open local database, using in-memory storage: {error}");
+            Storage::in_memory().expect("in-memory storage must initialize")
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState::default())
+        .manage(AppState::new(storage))
         .invoke_handler(tauri::generate_handler![
             get_volumes,
             scan_volume,
             cancel_scan,
+            get_latest_scan,
+            get_scan_history,
             get_treemap,
             quick_scan,
             get_finding,
@@ -1190,6 +1292,7 @@ pub fn run() {
             scan_volume_mft,
             find_duplicate_files,
             cancel_duplicate_scan,
+            get_latest_duplicate_scan,
             delete_duplicate_files,
             open_duplicate_file
         ])

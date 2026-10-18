@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 use chrono::DateTime;
-use disksage_core::path_safety::is_strict_descendant;
+use disksage_core::path_safety::DeleteGuard;
 use disksage_core::{
-    ActionSpec, Evidence, EvidenceKind, EvidenceSource, Finding, MatchedPath, Recoverability,
-    RiskLevel, SampleFile, SizeProvenance,
+    ActionSpec, EnvMap, Evidence, EvidenceKind, EvidenceSource, Finding, MatchedPath,
+    Recoverability, RiskLevel, SampleFile, SizeProvenance,
 };
+use rayon::prelude::*;
 use uuid::Uuid;
 
 use crate::error::RuleError;
-use crate::matcher::{CompiledRule, compile_rules};
+use crate::matcher::{CompiledRule, MatchedFile, compile_rules};
 use crate::schema::RulePack;
 
 pub struct QuickScanResult {
@@ -22,23 +22,32 @@ pub struct QuickScanResult {
 
 pub fn quick_scan(
     pack: &RulePack,
-    env: &disksage_core::EnvMap,
+    env: &EnvMap,
     include_admin: bool,
 ) -> Result<QuickScanResult, RuleError> {
     let rules = compile_rules(pack, env, include_admin)?;
-    let mut findings = Vec::new();
-    let mut matches = HashMap::new();
+    let guard = DeleteGuard::new(env);
 
-    for compiled in &rules {
-        let files = compiled.matched_files(env);
-        if files.is_empty() && !compiled.rule.requires_admin && !is_action_only(&compiled.action) {
-            continue;
-        }
-        let finding = build_finding(compiled, &files);
-        matches.insert(
-            finding.id.clone(),
-            files.into_iter().map(|(path, _)| path).collect(),
-        );
+    let results = rules
+        .par_iter()
+        .filter_map(|compiled| {
+            let files = compiled.matched_files(&guard);
+            if files.is_empty()
+                && !compiled.rule.requires_admin
+                && !is_action_only(&compiled.action)
+            {
+                return None;
+            }
+            let finding = build_finding(compiled, &files);
+            let paths = files.into_iter().map(|file| file.path).collect();
+            Some((finding, paths))
+        })
+        .collect::<Vec<_>>();
+
+    let mut findings = Vec::with_capacity(results.len());
+    let mut matches = HashMap::with_capacity(results.len());
+    for (finding, paths) in results {
+        matches.insert(finding.id.clone(), paths);
         findings.push(finding);
     }
 
@@ -67,7 +76,7 @@ fn is_action_only(action: &ActionSpec) -> bool {
     )
 }
 
-fn build_finding(compiled: &CompiledRule, files: &[(PathBuf, u64)]) -> Finding {
+fn build_finding(compiled: &CompiledRule, files: &[MatchedFile]) -> Finding {
     let rule = &compiled.rule;
     let mut allocated_bytes = 0u64;
     let mut file_count = 0u64;
@@ -77,47 +86,37 @@ fn build_finding(compiled: &CompiledRule, files: &[(PathBuf, u64)]) -> Finding {
     let mut sample_files = Vec::new();
     let mut target_stats: HashMap<PathBuf, (u64, u64)> = HashMap::new();
 
-    for (path, bytes) in files {
-        allocated_bytes = allocated_bytes.saturating_add(*bytes);
+    for file in files {
+        allocated_bytes = allocated_bytes.saturating_add(file.bytes);
         file_count = file_count.saturating_add(1);
 
-        let extension = path
+        let extension = file
+            .path
             .extension()
             .map(|value| format!(".{}", value.to_string_lossy().to_ascii_lowercase()))
             .unwrap_or_else(|| "(none)".to_string());
         *ext_counts.entry(extension).or_insert(0) += 1;
 
         if sample_files.len() < 10 {
-            let modified_at = std::fs::metadata(path)
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .and_then(system_time_to_timestamp);
             sample_files.push(SampleFile {
-                name: path
+                name: file
+                    .path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string()),
-                bytes: *bytes,
-                modified_at,
+                    .unwrap_or_else(|| file.path.display().to_string()),
+                bytes: file.bytes,
+                modified_at: file.modified_at,
             });
         }
 
-        if let Ok(metadata) = std::fs::metadata(path)
-            && let Ok(modified) = metadata.modified()
-            && let Some(timestamp) = system_time_to_timestamp(modified)
-        {
+        if let Some(timestamp) = file.modified_at {
             oldest = Some(oldest.map_or(timestamp, |value| value.min(timestamp)));
             newest = Some(newest.map_or(timestamp, |value| value.max(timestamp)));
         }
 
-        if let Some(target) = compiled
-            .targets
-            .iter()
-            .filter(|target| is_strict_descendant(path, &target.root))
-            .max_by_key(|target| target.root.as_os_str().len())
-        {
+        if let Some(target) = compiled.targets.get(file.target_index) {
             let entry = target_stats.entry(target.root.clone()).or_insert((0, 0));
-            entry.0 = entry.0.saturating_add(*bytes);
+            entry.0 = entry.0.saturating_add(file.bytes);
             entry.1 = entry.1.saturating_add(1);
         }
     }
@@ -398,18 +397,4 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit])
     }
-}
-
-fn system_time_to_timestamp(time: SystemTime) -> Option<i64> {
-    time.duration_since(UNIX_EPOCH)
-        .ok()
-        .map(|duration| duration.as_secs() as i64)
-}
-
-/// Exposed for tests and the executor: verify a stored match is still inside
-/// one of the compiled rule's roots.
-pub fn path_matches_rule(path: &Path, rule: &CompiledRule) -> bool {
-    rule.targets
-        .iter()
-        .any(|target| is_strict_descendant(path, &target.root))
 }

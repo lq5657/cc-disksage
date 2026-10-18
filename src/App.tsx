@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   cancelScan,
+  getLatestScan,
   getVolumes,
   scanVolume,
   scanVolumeMft,
@@ -424,7 +425,11 @@ export default function App() {
         if (cancelled) return;
         if (list.length > 0) {
           setVolumes(list);
-          setSelected(list[0].letter);
+          setSelected((current) =>
+            list.some((item) => item.letter === current)
+              ? current
+              : list[0].letter,
+          );
         }
       })
       .catch(() => {
@@ -433,6 +438,22 @@ export default function App() {
             "无法读取卷信息。若在浏览器中预览，请改用 npm run tauri dev 启动桌面应用。",
           );
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLatestScan()
+      .then((latest) => {
+        if (cancelled || !latest) return;
+        setSnapshot(latest);
+        setSelected(latest.volume);
+      })
+      .catch(() => {
+        // A missing/corrupt local database should not block the app.
       });
     return () => {
       cancelled = true;

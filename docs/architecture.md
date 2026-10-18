@@ -48,6 +48,10 @@ src-tauri（Tauri 命令 / AppState）
 12. **代码签名**：`build-installer.ps1 -Sign` 合并 `tauri.signed.conf.json`，Tauri 的
    `signCommand` 调用 `src-tauri/sign-command.ps1` → `scripts/sign-binary.ps1`，
    用 signtool 签名并验证 helper、主程序与 NSIS 安装包。
+13. **持久化**：`src-tauri/storage.rs` 使用 bundled SQLite，在
+   `%LOCALAPPDATA%\cc-disksage\disksage.db` 保存扫描摘要与重复文件结果。扫描完成、
+   重复扫描完成、重复删除后写入；启动时 `get_latest_scan` / `get_latest_duplicate_scan`
+   恢复最近结果，`get_scan_history` 供历史页展示。每个表保留最近 20 条。
 
 ## 安全边界
 
@@ -59,10 +63,12 @@ src-tauri（Tauri 命令 / AppState）
 
 ## 当前命令
 
-`get_volumes`、`scan_volume`、`scan_volume_mft`、`get_treemap`、`quick_scan`、
-`get_finding`、`create_plan`、`execute_plan`、`get_audit_history`、
-`find_duplicate_files`、`cancel_duplicate_scan`、`delete_duplicate_files`、
-`open_duplicate_file`、`llm_get_config`、`llm_set_config`、`llm_set_key`、
+`get_volumes`、`scan_volume`、`scan_volume_mft`、`get_latest_scan`、`get_scan_history`、
+`get_treemap`、`quick_scan`、`get_finding`、`create_plan`、`execute_plan`、
+`get_audit_history`、
+`find_duplicate_files`、`cancel_duplicate_scan`、`get_latest_duplicate_scan`、
+`delete_duplicate_files`、`open_duplicate_file`、`llm_get_config`、`llm_set_config`、
+`llm_set_key`、
 `llm_clear_key`、`llm_test_connection`、`llm_preview_payload`、
 `llm_assess_finding`、`llm_ask_followup`、`get_auto_clean_status`、
 `set_auto_clean_config`、`run_auto_clean_now`。

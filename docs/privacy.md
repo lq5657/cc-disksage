@@ -11,10 +11,14 @@ CC DiskSage 默认完全本地运行，无遥测。LLM 是可选功能，默认�
 | API Key | Windows 凭据管理器，service `cc-disksage.llm` |
 | 审计日志 | `%LOCALAPPDATA%\cc-disksage\logs\audit.jsonl` |
 | 自动清理日志 | `%LOCALAPPDATA%\cc-disksage\logs\auto-clean.jsonl`（仅计数、状态与说明，不含路径） |
+| 持久化数据库 | `%LOCALAPPDATA%\cc-disksage\disksage.db`（最近 20 次扫描摘要、重复文件结果、扫描历史） |
 | 隔离区（未来） | `%LOCALAPPDATA%\cc-disksage\quarantine\` |
 | 用户规则 | `%LOCALAPPDATA%\cc-disksage\rules\*.toml` |
 
-扫描快照与重复文件哈希结果目前保存在进程内存；持久化到 SQLite 属于后续里程碑。
+SQLite 保存扫描摘要（目录树前 3 层、Top 大文件）和重复文件分组/路径，不保存文件内容、
+注册表值、Cookie 或聊天内容。保留最近 20 次扫描与 20 次重复扫描，可在设置外手动删除
+`disksage.db` 清空。删除数据库前请先退出应用，避免 WAL 文件被占用。
+
 MFT 秒扫由本机提权 helper 读取 NTFS 元数据，重复文件扫描只在本机读取文件内容计算
 BLAKE3 哈希；两者都不会上传任何数据。代码签名只处理本地构建产物，不涉及用户数据。
 

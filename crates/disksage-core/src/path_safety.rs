@@ -190,6 +190,62 @@ pub fn system_red_line_files(env: &EnvMap) -> Vec<PathBuf> {
     files
 }
 
+/// Precomputed red-line and forbidden-root checks for hot scan loops.
+///
+/// The standalone functions above rebuild and normalize the same roots for
+/// every file. A scan should create one `DeleteGuard` and reuse it.
+#[derive(Debug, Clone)]
+pub struct DeleteGuard {
+    red_line_roots: Vec<String>,
+    red_line_files: Vec<String>,
+    forbidden_roots: Vec<String>,
+}
+
+impl DeleteGuard {
+    pub fn new(env: &EnvMap) -> Self {
+        Self {
+            red_line_roots: system_red_line_roots(env)
+                .iter()
+                .map(|path| normalize_for_compare(path))
+                .collect(),
+            red_line_files: system_red_line_files(env)
+                .iter()
+                .map(|path| normalize_for_compare(path))
+                .collect(),
+            forbidden_roots: forbidden_target_roots(env)
+                .iter()
+                .map(|path| normalize_for_compare(path))
+                .collect(),
+        }
+    }
+
+    pub fn is_system_red_line(&self, path: &Path) -> bool {
+        let candidate = normalize_for_compare(path);
+        self.is_red_line_normalized(&candidate)
+    }
+
+    pub fn rejects_delete_target(&self, path: &Path) -> bool {
+        let candidate = normalize_for_compare(path);
+        self.is_red_line_normalized(&candidate)
+            || self.forbidden_roots.iter().any(|root| root == &candidate)
+    }
+
+    fn is_red_line_normalized(&self, candidate: &str) -> bool {
+        self.red_line_files.iter().any(|file| file == candidate)
+            || self
+                .red_line_roots
+                .iter()
+                .any(|root| is_under_normalized(candidate, root))
+    }
+}
+
+fn is_under_normalized(candidate: &str, base: &str) -> bool {
+    candidate == base
+        || candidate
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with('\\'))
+}
+
 /// True when a path is inside a protected system location or is a protected
 /// system file. Descendants are protected, not just the root.
 pub fn is_system_red_line(path: &Path, env: &EnvMap) -> bool {
@@ -371,6 +427,36 @@ mod tests {
             Path::new(r"C:\Users\alice\AppData\Local\Temp\a.tmp"),
             &env
         ));
+    }
+
+    #[test]
+    fn delete_guard_matches_standalone_checks() {
+        let env = env();
+        let guard = DeleteGuard::new(&env);
+        for path in [
+            r"C:\Windows\WinSxS\file",
+            r"C:\Windows\Installer\a.msi",
+            r"C:\pagefile.sys",
+            r"C:\Windows\Temp\a.tmp",
+            r"C:\Users\alice\AppData\Local\Temp\a.tmp",
+            r"C:\Users\alice\Documents",
+            r"C:\Users\alice\Documents\a.docx",
+            r"\\?\C:\Windows\System32\file",
+        ] {
+            let path = Path::new(path);
+            assert_eq!(
+                guard.is_system_red_line(path),
+                is_system_red_line(path, &env),
+                "red line mismatch: {}",
+                path.display()
+            );
+            assert_eq!(
+                guard.rejects_delete_target(path),
+                is_forbidden_delete_target(path, &env),
+                "delete target mismatch: {}",
+                path.display()
+            );
+        }
     }
 
     #[test]

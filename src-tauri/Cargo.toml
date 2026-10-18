@@ -28,6 +28,7 @@ disksage-rules = { path = "../crates/disksage-rules" }
 disksage-clean = { path = "../crates/disksage-clean" }
 disksage-llm = { path = "../crates/disksage-llm" }
 dirs = "6"
+rusqlite = { version = "0.40", features = ["bundled"] }
 uuid.workspace = true
 chrono.workspace = true
 

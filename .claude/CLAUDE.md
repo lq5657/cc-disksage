@@ -65,12 +65,14 @@ npm run tauri build        # 安装包（目标）
 - 定时/低空间自动清理：`--auto-clean` 无窗口模式、Task Scheduler、安全规则过滤、设置页、独立日志
 - NTFS MFT 秒扫：UAC helper + `ntfs-reader` 分块读取 `$MFT`、路径重建、目录聚合
 - 重复文件：大小 → 快速哈希 → 完整 BLAKE3、硬链接去重、回收站删除（至少保留一个）
+- 快速扫描优化：release 冷缓存约 5s、热缓存约 2.7s（此前约 30s）
+- SQLite 持久化：扫描摘要、重复文件结果、扫描历史，重启恢复，保留最近 20 次
 - 代码签名流水线：signtool + PFX/证书指纹 + 时间戳，Tauri `signCommand` 签 helper/主程序/安装包
 - NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
 
 未实现：
 
-- 自动更新、SQLite 快照持久化（当前快照在进程内存）
+- 自动更新
 
 验证基线：
 
@@ -85,12 +87,15 @@ npm run tauri build        # 安装包（目标）
 - 重复文件真实删除 fixture：保留一个、另一个进回收站、审计写入
 - 管理员 helper 清理（UAC）：Windows Temp/WER/Minidump 删除 233 文件 / 约 160 MiB，3 个占用文件失败；审计 elevation=true
 - DISM Analyze（UAC）：3010 需重启；已修复 DISM 隐藏重启提示卡死（/NoRestart + 15 分钟超时）
+- 快速扫描 release 冷缓存 4.97s / 热缓存 2.72s，结果一致
+- SQLite 文件数据库跨重启 roundtrip、应用启动建库与表结构验证通过
 - 代码签名流水线验证通过，但按当前决定暂不用于发布
 - NSIS 安装包已完成静默安装 → 启动 → 卸载验证；卸载钩子会移除自动清理计划任务
-- 安装包：`dist-installers/`（offline 约 211MB / lite 约 3.9MB）
+- 安装包：`dist-installers/`（offline 约 212MB / lite 约 4.8MB）
 
 待人工验证：
 
 - 自动清理实际到点运行（会清理真实缓存）
+- 重启后恢复最近扫描/重复结果、历史页扫描列表的 UI 点击验证
 - 系统引导项与重复文件删除 UI 点击流程
 - 干净 Windows 10 断网安装（VM）

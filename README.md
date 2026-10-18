@@ -14,7 +14,8 @@
 
 已实现：
 
-- 卷枚举与全盘只读扫描（并行 walker，C 盘实测 71 万文件约 63 秒；带实时进度与取消）
+- 卷枚举与全盘只读扫描（并行 walker，C 盘实测 71 万文件约 60 秒；带实时进度与取消）
+- 快速扫描优化：release 冷缓存约 5 秒、热缓存约 2.7 秒（此前约 30 秒）
 - NTFS MFT 秒扫：通过 UAC 提权 helper 读取 `$MFT`，分块扫描、路径重建、目录聚合；非 NTFS 自动拒绝并建议普通扫描
 - 重复文件查找：按大小 → 64KB 首尾快速哈希 → 完整 BLAKE3 分组；硬链接去重；默认只扫描文档/下载/图片/视频/桌面
 - 重复文件清理：服务端保存扫描结果，前端只传组/文件 ID；至少保留一个，删除只进回收站，复用计划校验与审计
@@ -28,14 +29,14 @@
 - 回收站清空：通过系统 API 执行，明确不可恢复
 - 定时 / 低空间自动清理：Windows 计划任务运行无窗口 `--auto-clean`，仅处理安全、默认勾选、可重建、无需管理员的缓存；可选永久删除或回收站
 - LLM 设置（OpenAI 兼容 / Ollama `/v1`）、payload 预览与同意、逐项 AI 分析、继续追问
-- 历史记录页（读取本地审计日志）
+- 历史记录页（扫描历史 + 本地审计日志）
+- SQLite 持久化：扫描快照、重复文件结果、扫描历史；重启后恢复最近结果（保留最近 20 次）
 - 代码签名流水线：signtool + PFX/证书指纹 + RFC3161 时间戳；Tauri `signCommand` 签名主程序、helper 与安装包
 - NSIS 安装包（offline WebView2 / lite 两种配置）；卸载时移除计划任务
 
 尚未实现（后续里程碑）：
 
 - 自动更新
-- SQLite 快照持久化
 
 ## 安全模型
 
@@ -57,8 +58,8 @@
 
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
-| `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 211 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 3.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.1.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
+| `dist-installers/cc-disksage-0.1.0-lite-setup.exe` | 约 4.8 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
@@ -116,6 +117,14 @@ MFT 总量较低主要是因为硬链接只计一次、跳过 reparse/部分系�
 - 结果最多保留 300 组、每组 50 个文件；硬链接文件（多个名称指向同一份数据）会被排除，
   避免把“同一文件的两个名称”误报为可释放的重复项。
 
+### 本地持久化
+
+- 数据库：`%LOCALAPPDATA%\cc-disksage\disksage.db`（SQLite WAL）。
+- 保存扫描摘要（目录树前 3 层、Top 大文件）和重复文件分组；不保存文件内容。
+- 保留最近 20 次扫描和 20 次重复扫描；重启后仪表盘恢复最近一次扫描，重复文件页恢复最近一次结果。
+- 历史页展示扫描历史；清理审计仍写入 `audit.jsonl`。
+- 数据库只在本机，不上传；删除数据库即可清空持久化历史。
+
 ### 代码签名
 
 发布签名需要自备受信任的 Authenticode 证书。使用 PFX：
@@ -149,6 +158,8 @@ powershell -File scripts/build-installer.ps1 -Lite -Sign
 - 无窗口 `--auto-clean`：未启用时退出码 1 并记录日志；高于阈值时跳过清理
 - **真实 MFT 提权扫描（UAC）通过**：652,696 文件 / 204,702 目录 / 122.57 GiB / 5.76 秒 / 0 读取错误
 - **walker 对比**：718,862 文件 / 200,196 目录 / 131.52 GiB / 59.6 秒 / 102 权限错误
+- **快速扫描优化**：release 冷缓存 4.97 秒 / 热缓存 2.72 秒，19 个候选项，结果与优化前一致
+- **SQLite 持久化**：文件数据库跨重启 roundtrip 通过；实际应用启动创建 `disksage.db`，表 `scans` / `duplicate_scans` 正常
 - MFT 目录聚合、`$WinREAgent` 保留、NTFS 元数据/reparse 跳过、节点上限单测通过；非管理员 helper 拒绝执行
 - 重复文件：真实用户内容目录只读扫描通过；硬链接、大小/阈值、跳过 AppData/腾讯数据、取消等测试通过
 - **重复文件真实删除 fixture 通过**：至少保留一个副本，另一个移至回收站，审计写入

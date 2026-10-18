@@ -13,6 +13,7 @@ import {
   cancelDuplicateScan,
   deleteDuplicateFiles,
   findDuplicateFiles,
+  getLatestDuplicateScan,
   openDuplicateFile,
   type DuplicateGroup,
   type DuplicateScanProgress,
@@ -221,6 +222,26 @@ export default function DuplicatesPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [visibleGroups, setVisibleGroups] = useState(20);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLatestDuplicateScan()
+      .then((latest) => {
+        if (cancelled || !latest) return;
+        setResult((current) => current ?? latest);
+        setMessage(
+          `已恢复上次重复扫描结果：${latest.groups.length} 组，可释放 ${formatBytes(
+            latest.total_wasted_bytes,
+          )}。`,
+        );
+      })
+      .catch(() => {
+        // Persistence failures should not block a fresh scan.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleScan() {
     setScanning(true);

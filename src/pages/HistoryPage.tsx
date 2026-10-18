@@ -6,7 +6,12 @@ import {
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
-import { getAuditHistory, type AuditEntry } from "../lib/api";
+import {
+  getAuditHistory,
+  getScanHistory,
+  type AuditEntry,
+  type ScanHistoryEntry,
+} from "../lib/api";
 import { formatBytes } from "../lib/format";
 
 const RESULT_LABEL: Record<string, string> = {
@@ -25,6 +30,7 @@ const RESULT_STYLE: Record<string, string> = {
 
 export default function HistoryPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [scans, setScans] = useState<ScanHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +38,12 @@ export default function HistoryPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await getAuditHistory(200);
-      setEntries(result);
+      const [audit, scanHistory] = await Promise.all([
+        getAuditHistory(200),
+        getScanHistory(20),
+      ]);
+      setEntries(audit);
+      setScans(scanHistory);
     } catch (loadError) {
       setError(String(loadError));
     } finally {
@@ -84,6 +94,68 @@ export default function HistoryPage() {
           {error}
         </div>
       ) : null}
+
+      <section className="rounded-2xl border border-emerald-900/10 bg-white p-5 dark:border-emerald-100/10 dark:bg-emerald-950/40">
+        <div>
+          <h3 className="font-semibold">扫描历史</h3>
+          <p className="mt-1 text-sm text-emerald-900/55 dark:text-emerald-100/55">
+            最近 {scans.length} 次扫描；重启后仍可恢复最近一次结果。
+          </p>
+        </div>
+        {scans.length === 0 ? (
+          <p className="mt-4 text-sm text-emerald-900/50 dark:text-emerald-100/50">
+            还没有保存的扫描记录。
+          </p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="text-xs text-emerald-900/50 dark:text-emerald-100/50">
+                <tr>
+                  <th className="pb-2 pr-3 font-medium">时间</th>
+                  <th className="pb-2 pr-3 font-medium">磁盘</th>
+                  <th className="pb-2 pr-3 font-medium">引擎</th>
+                  <th className="pb-2 pr-3 font-medium">文件/目录</th>
+                  <th className="pb-2 pr-3 font-medium">大小</th>
+                  <th className="pb-2 pr-3 font-medium">耗时</th>
+                  <th className="pb-2 font-medium">错误</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-emerald-900/10 dark:divide-emerald-100/10">
+                {scans.map((scan) => (
+                  <tr key={scan.id}>
+                    <td className="whitespace-nowrap py-2 pr-3">
+                      {new Date(scan.started_at * 1000).toLocaleString("zh-CN")}
+                    </td>
+                    <td className="py-2 pr-3 font-medium">{scan.volume}:</td>
+                    <td className="py-2 pr-3">
+                      {scan.engine === "mft" ? "MFT" : "目录遍历"}
+                    </td>
+                    <td className="whitespace-nowrap py-2 pr-3">
+                      {scan.file_count.toLocaleString()} /{" "}
+                      {scan.dir_count.toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {formatBytes(scan.allocated_bytes)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {(scan.duration_ms / 1000).toFixed(1)}s
+                    </td>
+                    <td className="py-2">
+                      {scan.error_count > 0 ? (
+                        <span className="text-amber-700 dark:text-amber-300">
+                          {scan.error_count}
+                        </span>
+                      ) : (
+                        "0"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="overflow-hidden rounded-2xl border border-emerald-900/10 bg-white dark:border-emerald-100/10 dark:bg-emerald-950/40">
         {entries.length === 0 && !loading ? (
