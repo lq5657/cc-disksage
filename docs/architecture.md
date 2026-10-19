@@ -25,14 +25,19 @@ src-tauri（Tauri 命令 / AppState）
 5. **执行**：`execute_plan(plan_id, permanent_delete, on_progress)` 二次校验后调用回收站/删除；
    回收站文件按 256 个一批交给同一次 IFileOperation，前端通过 Channel 收到处理数、字节、
    失败数与当前路径。仅安全/谨慎、可重建、非管理员项可勾选永久删除（二次确认），
-   避免大缓存的回收站逐文件开销。逐项写审计；回收站清空通过 PowerShell 的
-   `Clear-RecycleBin` 系统 API 执行，不可恢复。
+   避免大缓存的回收站逐文件开销。逐项写审计；回收站清空优先通过 PowerShell 的
+   `Clear-RecycleBin` 执行，PowerShell 不可用或失败时回退到 `SHEmptyRecycleBinW`，
+   不可恢复。
 6. **系统引导**：Windows.old/还原点/分页文件规则的 action 为 `Guided`；Tauri 层打开
    `cleanmgr.exe`、`SystemPropertiesProtection.exe` 或 `SystemPropertiesAdvanced.exe`，不直接删除。
 7. **管理员执行/扫描**：普通项在主进程执行；管理员项写入 `<数据目录>\jobs\<job>.json`，
-   通过 `Start-Process -Verb RunAs` 启动 `disksage-helper.exe`。helper 校验 nonce/过期时间/规则 ID，
-   重新加载编译进二进制的规则并提权扫描，只执行固定 `ActionSpec`；服务名白名单为
-   `wuauserv/bits/dosvc`。结果写回 `<job>.result.json`，主进程合并并展示。
+   优先通过 PowerShell `Start-Process -Verb RunAs` 启动 `disksage-helper.exe`；
+   PowerShell 不存在、无法创建或在 UAC 前失败时，自动回退到
+   `ShellExecuteExW("runas")`。用户取消 UAC 不会重试，避免二次弹窗。
+   helper 校验 nonce/过期时间/规则 ID，重新加载编译进二进制的规则并提权扫描，
+   只执行固定 `ActionSpec`；服务名白名单为 `wuauserv/bits/dosvc`，
+   服务控制优先 PowerShell，失败时回退到 SCM API。结果写回 `<job>.result.json`，
+   主进程合并并展示。
    清理建议页的「管理员扫描」使用同一 job 机制但 task 为 `quick_scan`：helper 只读扫描
    全部内置管理员规则，将 findings、精确文件列表和 resolved roots 写入 `<job>.scan.json`，
    主进程重新挂载 targets 后展示实测大小；取消 UAC 时保留普通扫描结果。

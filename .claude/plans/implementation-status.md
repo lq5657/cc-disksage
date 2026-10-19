@@ -33,6 +33,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 | 托盘/通知 | 托盘图标、关闭隐藏、显示/退出菜单；扫描/快速扫描/清理/重复文件/手动自动清理完成通知 |
 | 代码签名 | `sign-binary.ps1`、`sign-installers.ps1`、`tauri.signed.conf.json`、`sign-command.ps1`、PFX/指纹/时间戳、Tauri signCommand 签名 helper/主程序/安装包 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
+| 提权兼容（P0） | PowerShell 优先 + 原生 `ShellExecuteExW("runas")` 自动回退；helper 服务控制回退 SCM API、回收站回退 `SHEmptyRecycleBinW`；取消 UAC 不重试；实现完成，待禁用 PowerShell 的 Win10 实测 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
@@ -70,6 +71,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 无窗口 `--auto-clean`：未启用退出码 1；系统盘剩余空间高于测试阈值时正确跳过，未触发删除
 - NSIS 安装/启动/卸载：真机通过；安装目录包含 `disksage-helper.exe`；卸载后 `CC DiskSage Auto Clean` 计划任务被移除
 - 最终未签名包复核：安装后的 `cc-disksage.exe` / `disksage-helper.exe` Authenticode 状态为 NotSigned；自签名测试证书与临时 PFX 已清理
+- P0 提权回退：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`npm run test`、`npm run build` 通过；`npm run build:helper:release` 与 `npm run tauri build` 通过，生成 `target\release\bundle\nsis\CC DiskSage_0.2.0_x64-setup.exe`；待禁用 PowerShell 的 Win10 真机验证回退路径
 
 ## 未完成（下一阶段）
 
@@ -80,6 +82,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 5. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
 6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
 7. 扫描快照只持久化前 3 层摘要；如果后续需要深层下钻，再改存压缩的完整树。
+8. 在禁用 PowerShell 的 Windows 10 环境实测提权回退、服务缓存清理与回收站清空。
 
 ## 已知限制
 
@@ -89,6 +92,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 管理员 Temp/WER/Minidump 清理实测 3 个占用文件返回失败；文件动作使用回收站，`freed_bytes` 更接近“已处理字节”，不一定立即反映磁盘可用空间。
 - 回收站删除需要为每个文件创建系统记录，大缓存仍可能较慢；确认页提供「永久删除可重建缓存」快速路径（需二次确认）。
 - 管理员扫描需要一次 UAC，且只扫描内置管理员规则；普通扫描会先完成并保留结果，取消 UAC 不会丢失普通结果。
+- PowerShell 仍是管理员提权与服务控制的主路径；仅在 PowerShell 不存在、无法创建或 UAC 前失败时回退到原生 API。回退路径同样需要 UAC（当前进程已提权时除外）。
 - 大文件删除不来自规则缓存，只接受快照 ID + 文件索引、只进回收站；Windows/Program Files/ProgramData 会被拒绝。AI 只根据元数据给建议，不能判断文件内容。
 - 大文件 AI 默认不发送文件名（payload 中为 `<file>`）；需要更准确判断时在设置页开启「发送样本文件名」。
 - DISM 操作可能返回 3010（需要重启），不会自动重启；超时 15 分钟会终止并提示检查 `dism.log`。

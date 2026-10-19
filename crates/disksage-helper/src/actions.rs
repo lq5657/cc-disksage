@@ -8,11 +8,32 @@ use disksage_core::path_safety::{is_forbidden_delete_target, is_system_red_line}
 use disksage_core::{CleanupResult, EnvMap};
 use walkdir::WalkDir;
 
+#[cfg(windows)]
+use windows::Win32::Foundation::CloseHandle;
+#[cfg(windows)]
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+#[cfg(windows)]
+use windows::Win32::System::Services::{
+    CloseServiceHandle, ControlService, OpenSCManagerW, OpenServiceW, QueryServiceStatus,
+    SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_CONTROL_STOP, SERVICE_QUERY_STATUS, SERVICE_RUNNING,
+    SERVICE_START, SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, StartServiceW,
+};
+#[cfg(windows)]
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+#[cfg(windows)]
+use windows::core::PCWSTR;
+
 const SERVICE_ALLOWLIST: &[&str] = &["wuauserv", "bits", "dosvc"];
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DISM_TIMEOUT: Duration = Duration::from_secs(900);
 
 pub fn is_elevated() -> bool {
+    #[cfg(windows)]
+    if let Some(elevated) = native_is_elevated() {
+        return elevated;
+    }
+
+    // Fallback for unusual environments where the token query is unavailable.
     // SID S-1-16-12288 is the High mandatory level; S-1-16-16384 is System.
     if let Ok(output) = Command::new("whoami").args(["/groups"]).output() {
         let text = String::from_utf8_lossy(&output.stdout);
@@ -29,6 +50,31 @@ pub fn is_elevated() -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn native_is_elevated() -> Option<bool> {
+    use windows::Win32::Foundation::HANDLE;
+
+    let mut token = HANDLE::default();
+    unsafe {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return None;
+        }
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut returned = 0u32;
+        let result = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut core::ffi::c_void),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        );
+        let _ = CloseHandle(token);
+
+        result.ok().map(|_| elevation.TokenIsElevated != 0)
+    }
 }
 
 fn command(program: &str) -> Command {
@@ -101,6 +147,28 @@ fn validate_service(service: &str) -> Result<(), String> {
 
 fn service_is_running(service: &str) -> Result<bool, String> {
     validate_service(service)?;
+    match powershell_service_is_running(service) {
+        Ok(running) => Ok(running),
+        Err(powershell_error) => {
+            #[cfg(windows)]
+            {
+                match native_service_is_running(service) {
+                    Ok(running) => Ok(running),
+                    Err(native_error) => Err(format!(
+                        "PowerShell: {powershell_error}; native SCM: {native_error}"
+                    )),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                Err(powershell_error)
+            }
+        }
+    }
+}
+
+fn powershell_service_is_running(service: &str) -> Result<bool, String> {
+    validate_service(service)?;
     let script = format!(
         "(Get-Service -Name '{}' -ErrorAction Stop).Status -eq 'Running'",
         service
@@ -116,6 +184,28 @@ fn service_is_running(service: &str) -> Result<bool, String> {
 
 fn stop_service(service: &str) -> Result<(), String> {
     validate_service(service)?;
+    match powershell_stop_service(service) {
+        Ok(()) => Ok(()),
+        Err(powershell_error) => {
+            #[cfg(windows)]
+            {
+                match native_stop_service(service) {
+                    Ok(()) => Ok(()),
+                    Err(native_error) => Err(format!(
+                        "PowerShell: {powershell_error}; native SCM: {native_error}"
+                    )),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                Err(powershell_error)
+            }
+        }
+    }
+}
+
+fn powershell_stop_service(service: &str) -> Result<(), String> {
+    validate_service(service)?;
     let script = format!("Stop-Service -Name '{}' -Force -ErrorAction Stop", service);
     let output = powershell(&script)?;
     if !output.status.success() {
@@ -124,7 +214,7 @@ fn stop_service(service: &str) -> Result<(), String> {
 
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
-        if !service_is_running(service)? {
+        if !powershell_service_is_running(service)? {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -134,6 +224,28 @@ fn stop_service(service: &str) -> Result<(), String> {
 
 fn start_service(service: &str) -> Result<(), String> {
     validate_service(service)?;
+    match powershell_start_service(service) {
+        Ok(()) => Ok(()),
+        Err(powershell_error) => {
+            #[cfg(windows)]
+            {
+                match native_start_service(service) {
+                    Ok(()) => Ok(()),
+                    Err(native_error) => Err(format!(
+                        "PowerShell: {powershell_error}; native SCM: {native_error}"
+                    )),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                Err(powershell_error)
+            }
+        }
+    }
+}
+
+fn powershell_start_service(service: &str) -> Result<(), String> {
+    validate_service(service)?;
     let script = format!("Start-Service -Name '{}' -ErrorAction Stop", service);
     let output = powershell(&script)?;
     if output.status.success() {
@@ -141,6 +253,116 @@ fn start_service(service: &str) -> Result<(), String> {
     } else {
         Err(output_summary(&output))
     }
+}
+
+#[cfg(windows)]
+struct ServiceHandles {
+    scm: SC_HANDLE,
+    service: SC_HANDLE,
+}
+
+#[cfg(windows)]
+impl Drop for ServiceHandles {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseServiceHandle(self.service);
+            let _ = CloseServiceHandle(self.scm);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn open_service(service: &str, access: u32) -> Result<ServiceHandles, String> {
+    let scm = unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) }
+        .map_err(|error| format!("OpenSCManagerW: {error}"))?;
+    let name = wide(service);
+    match unsafe { OpenServiceW(scm, PCWSTR::from_raw(name.as_ptr()), access) } {
+        Ok(handle) => Ok(ServiceHandles {
+            scm,
+            service: handle,
+        }),
+        Err(error) => {
+            unsafe {
+                let _ = CloseServiceHandle(scm);
+            }
+            Err(format!("OpenServiceW({service}): {error}"))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn native_service_state(
+    service: &str,
+    access: u32,
+) -> Result<windows::Win32::System::Services::SERVICE_STATUS_CURRENT_STATE, String> {
+    let handles = open_service(service, access)?;
+    let mut status = SERVICE_STATUS::default();
+    unsafe { QueryServiceStatus(handles.service, &mut status) }
+        .map_err(|error| format!("QueryServiceStatus({service}): {error}"))?;
+    Ok(status.dwCurrentState)
+}
+
+#[cfg(windows)]
+fn native_service_is_running(service: &str) -> Result<bool, String> {
+    let state = native_service_state(service, SERVICE_QUERY_STATUS)?;
+    Ok(state == SERVICE_RUNNING)
+}
+
+#[cfg(windows)]
+fn native_stop_service(service: &str) -> Result<(), String> {
+    let handles = open_service(service, SERVICE_STOP | SERVICE_QUERY_STATUS)?;
+    let mut status = SERVICE_STATUS::default();
+    match unsafe { ControlService(handles.service, SERVICE_CONTROL_STOP, &mut status) } {
+        Ok(()) => {}
+        Err(error) if is_win32_error(&error, 1062) => return Ok(()),
+        Err(error) => return Err(format!("ControlService({service}): {error}")),
+    }
+    drop(handles);
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        match native_service_state(service, SERVICE_QUERY_STATUS) {
+            Ok(state) if state == SERVICE_STOPPED => return Ok(()),
+            Ok(_) => std::thread::sleep(Duration::from_millis(500)),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(format!(
+        "service {service} did not stop within 20 seconds (native SCM)"
+    ))
+}
+
+#[cfg(windows)]
+fn native_start_service(service: &str) -> Result<(), String> {
+    let handles = open_service(service, SERVICE_START | SERVICE_QUERY_STATUS)?;
+    match unsafe { StartServiceW(handles.service, None) } {
+        Ok(()) => {}
+        Err(error) if is_win32_error(&error, 1056) => return Ok(()),
+        Err(error) => return Err(format!("StartServiceW({service}): {error}")),
+    }
+    drop(handles);
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        match native_service_state(service, SERVICE_QUERY_STATUS) {
+            Ok(state) if state == SERVICE_RUNNING => return Ok(()),
+            Ok(_) => std::thread::sleep(Duration::from_millis(500)),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(format!(
+        "service {service} did not start within 20 seconds (native SCM)"
+    ))
+}
+
+#[cfg(windows)]
+fn is_win32_error(error: &windows::core::Error, code: u32) -> bool {
+    error.code().0 as u32 == (0x8007_0000 | (code & 0xFFFF))
 }
 
 /// Stop allowlisted services, clear fixed cache directories, then restore the
@@ -393,13 +615,8 @@ pub fn hibernate_off(result: &mut CleanupResult) {
 }
 
 pub fn empty_recycle_bin(result: &mut CleanupResult) {
-    match powershell("Clear-RecycleBin -Force -ErrorAction Stop") {
-        Ok(output) if output.status.success() => {
-            result.notes.push("回收站已清空".into());
-        }
-        Ok(output) => result
-            .notes
-            .push(format!("清空回收站失败：{}", output_summary(&output))),
+    match disksage_clean::recycle_bin::empty_recycle_bin() {
+        Ok(()) => result.notes.push("回收站已清空".into()),
         Err(error) => result.notes.push(format!("清空回收站失败：{error}")),
     }
 }

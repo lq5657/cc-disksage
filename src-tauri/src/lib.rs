@@ -1,4 +1,5 @@
 mod auto_clean;
+mod elevation;
 mod storage;
 
 use std::collections::HashMap;
@@ -1257,7 +1258,7 @@ async fn run_admin_job(rule_ids: Vec<String>) -> Result<CleanupResult, String> {
     let helper_for_launch = helper.clone();
     let job_for_launch = job_path.clone();
     let launch = tauri::async_runtime::spawn_blocking(move || {
-        launch_elevated_helper(&helper_for_launch, &job_for_launch)
+        elevation::launch_elevated_helper(&helper_for_launch, &job_for_launch)
     })
     .await
     .map_err(|error| format!("helper launch task failed: {error}"))?;
@@ -1305,7 +1306,7 @@ async fn run_admin_scan_job() -> Result<ScanPayload, String> {
     let helper_for_launch = helper.clone();
     let job_for_launch = job_path.clone();
     let launch = tauri::async_runtime::spawn_blocking(move || {
-        launch_elevated_helper(&helper_for_launch, &job_for_launch)
+        elevation::launch_elevated_helper(&helper_for_launch, &job_for_launch)
     })
     .await
     .map_err(|error| format!("helper launch task failed: {error}"))?;
@@ -1367,7 +1368,7 @@ async fn run_mft_scan_job(volume: char) -> Result<ScanSnapshot, String> {
     let helper_for_launch = helper.clone();
     let job_for_launch = job_path.clone();
     let launch = tauri::async_runtime::spawn_blocking(move || {
-        launch_elevated_helper(&helper_for_launch, &job_for_launch)
+        elevation::launch_elevated_helper(&helper_for_launch, &job_for_launch)
     })
     .await
     .map_err(|error| format!("helper launch task failed: {error}"))?;
@@ -1690,53 +1691,6 @@ fn open_duplicate_file(
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
-}
-
-#[cfg(windows)]
-fn launch_elevated_helper(helper: &std::path::Path, job: &std::path::Path) -> Result<(), String> {
-    let quote =
-        |path: &std::path::Path| format!("'{}'", path.display().to_string().replace('\'', "''"));
-    let script = format!(
-        "try {{ $p = Start-Process -FilePath {} -ArgumentList '--job',{} -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop; exit $p.ExitCode }} catch {{ Write-Error $_.Exception.Message; exit 1223 }}",
-        quote(helper),
-        quote(job)
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
-        .output()
-        .map_err(|error| format!("无法启动提权 helper：{error}"))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let lower = stderr.to_ascii_lowercase();
-    if output.status.code() == Some(1223)
-        || lower.contains("canceled")
-        || lower.contains("cancelled")
-        || stderr.contains("取消")
-    {
-        Err("用户取消了管理员授权".into())
-    } else {
-        Err(format!(
-            "提权 helper 失败（退出码 {}）：{}",
-            output.status.code().unwrap_or(-1),
-            stderr
-        ))
-    }
-}
-
-#[cfg(not(windows))]
-fn launch_elevated_helper(_helper: &std::path::Path, _job: &std::path::Path) -> Result<(), String> {
-    Err("elevated cleanup is only supported on Windows".into())
 }
 
 fn duplicate_scan_from_state(
