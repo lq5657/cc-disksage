@@ -18,6 +18,8 @@ const NEW_RULES: &[&str] = &[
     "system.panther_logs",
     "system.live_kernel_reports",
     "system.windows_system_temp",
+    "apps.office_cache",
+    "system.upgrade_leftovers",
 ];
 
 const ENV_VARS: &[&str] = &[

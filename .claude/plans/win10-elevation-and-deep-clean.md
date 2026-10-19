@@ -458,7 +458,38 @@ Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |
 - 在 Windows 10 22H2 上核验路径与大小，并更新各规则的 `verified_on`。
 - 继续批次 2：Office/Teams、游戏平台、开发缓存、升级残留、只读深度发现。
 
-## 六、参考
+## 六、深度清理批次 2（2026-10-19）
+
+新增/扩展：
+
+| 规则 | 变化 | 风险 | 管理员 | 默认勾选 | 真机实测（Windows 11 26200） |
+|---|---|---|---|---|---|
+| `apps.office_cache` | 新增：SolutionPackages、WebServiceCache、SmartLookupCache、OTele、OneNote cache | caution | 否 | 否 | 532.7 MB / 4768 文件 |
+| `system.servicing_logs` | 扩展：waasmediccapsule、PITR、NetSetup、WinREAgent、SetupRecoveryDataTask | caution | 是 | 否 | 607.1 MB / 116 文件（非提权估算） |
+| `system.upgrade_leftovers` | 新增：`$GetCurrent`、`$WINDOWS.~BT`、`$Windows.~WS`、`$WinREAgent`、`ESD`，仅引导 cleanmgr | caution | 否 | 否 | 本机无残留；不直接删除 |
+
+已验证的边界：
+
+- Office 规则只匹配 `SolutionPackages`、`16.0\WebServiceCache`、`16.0\SmartLookupCache`、`OTele`、
+  `OneNote\16.0\cache`；**不触碰 `16.0\WEF`（旁加载加载项）、OfficeFileCache、Outlook 数据、
+  OneNote 笔记本、文档或账户设置**。建议关闭 Office 后清理。
+- 维护日志规则不触碰 `CBS.log`、`MeasuredBoot`、`SystemRestore`、WinSxS 或已安装更新。
+- 升级残留规则 `action = guided`，只打开 cleanmgr，不直接删除；`System Volume Information`
+  与还原点不会被触碰。
+- `system.inet_cache` 评估后未纳入：排除 `SuggestedSites.dat`、Outlook/MSO/Word 内容后只剩
+  约 34.7 KB / 7 文件，收益过低，不增加规则面。
+- `%PROGRAMDATA%\Package Cache`（实测约 484.8 MB）与
+  `%PROGRAMDATA%\Microsoft\VisualStudio\Packages`（约 1.26 GB）**不纳入自动清理**：
+  删除会破坏应用/VS 的修复与卸载；后续只考虑引导或只读展示。
+
+测试：
+
+- `apps.office_cache`、`system.upgrade_leftovers` 已加入 `NEW_RULES` 与 positive/redline fixture。
+- `system.servicing_logs` 的新增目标已补充 positive fixture；`MeasuredBoot`/`SystemRestore`/
+  `WinREAgent/diagerr.xml` 作为 redline 断言零命中。
+- `cargo test -p disksage-rules --test builtin_fixtures --test quick_scan` 通过。
+
+## 七、参考
 
 - 现有实现状态：`.claude/plans/implementation-status.md`
 - 规则引擎与安全边界：`.claude/plans/disk-cleaner-implementation.md` 第 8 节

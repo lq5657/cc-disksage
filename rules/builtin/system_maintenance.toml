@@ -79,3 +79,27 @@ targets = [
 ]
 explain = { what_zh = "回收站中保存着已删除但尚未清空的文件。", what_en = "The Recycle Bin contains deleted files that have not been purged.", impact_zh = "通过系统 API 清空回收站；清空后无法恢复其中的文件。", impact_en = "Empties the Recycle Bin through the system API; files cannot be restored afterwards.", exclude_notes_zh = "不会触碰回收站以外的文件；清空前请确认没有需要恢复的内容。", exclude_notes_en = "No files outside the Recycle Bin are touched; confirm there is nothing to restore.", source = "Windows Recycle Bin" }
 action = { type = "empty_recycle_bin" }
+
+[[rules]]
+id = "system.upgrade_leftovers"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200（路径核验；本机无残留）"
+category = "system_maintenance"
+title_zh = "Windows 升级残留"
+title_en = "Windows upgrade leftovers"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "irreversible"
+min_age_days = 0
+detect = { path_exists_any = ["%SYSTEMDRIVE%\\$GetCurrent", "%SYSTEMDRIVE%\\$WINDOWS.~BT", "%SYSTEMDRIVE%\\$Windows.~WS", "%SYSTEMDRIVE%\\$WinREAgent", "%SYSTEMDRIVE%\\ESD"] }
+targets = [
+  { root = "%SYSTEMDRIVE%\\$GetCurrent", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 },
+  { root = "%SYSTEMDRIVE%\\$WINDOWS.~BT", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 },
+  { root = "%SYSTEMDRIVE%\\$Windows.~WS", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 },
+  { root = "%SYSTEMDRIVE%\\$WinREAgent", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 },
+  { root = "%SYSTEMDRIVE%\\ESD", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 }
+]
+explain = { what_zh = "Windows 升级/回滚过程留下的暂存与日志目录。", what_en = "Staging and log directories left by Windows upgrade or rollback.", impact_zh = "将打开系统磁盘清理工具；在系统界面确认删除后无法回滚到旧版本。", impact_en = "Opens Windows Disk Cleanup; after confirming deletion in the system UI, rollback to the previous version is no longer possible.", exclude_notes_zh = "本工具不会直接删除这些目录；由你在系统界面确认。System Volume Information 与还原点不会被触碰。", exclude_notes_en = "This tool never deletes these directories directly; you confirm in the system UI. System Volume Information and restore points are never touched.", source = "Windows upgrade staging conventions; supported removal via Disk Cleanup" }
+action = { type = "guided", guide = "clean_mgr" }

@@ -79,3 +79,27 @@ targets = [
 ]
 explain = { what_zh = "Slack 的网页与代码缓存。", what_en = "Slack web and code cache.", impact_zh = "删除后 Slack 首次加载可能略慢；登录状态与消息记录不受影响。", impact_en = "Slack may load slightly slower; sign-in state and message history are untouched.", exclude_notes_zh = "硬排除 IndexedDB、Local Storage 与 Cookie。", exclude_notes_en = "IndexedDB, Local Storage, and cookies are hard-excluded.", source = "Slack user-data cache layout" }
 action = { type = "trash" }
+
+[[rules]]
+id = "apps.office_cache"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / Office 16.0.20430.20182"
+category = "apps"
+title_zh = "Microsoft Office 缓存"
+title_en = "Microsoft Office cache"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 7
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Microsoft\\Office", "%LOCALAPPDATA%\\Microsoft\\OneNote"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Microsoft\\Office\\SolutionPackages", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 },
+  { root = "%LOCALAPPDATA%\\Microsoft\\Office\\16.0\\WebServiceCache", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 4 },
+  { root = "%LOCALAPPDATA%\\Microsoft\\Office\\16.0\\SmartLookupCache", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 4 },
+  { root = "%LOCALAPPDATA%\\Microsoft\\Office\\OTele", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 4 },
+  { root = "%LOCALAPPDATA%\\Microsoft\\OneNote\\16.0\\cache", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 4 }
+]
+explain = { what_zh = "Office Web 加载项/模板包缓存、Web 服务缓存、智能查找缓存、遥测缓存与 OneNote 缓存。", what_en = "Office web add-in/template package cache, web service cache, Smart Lookup cache, telemetry cache, and OneNote cache.", impact_zh = "关闭 Office 后清理；加载项/模板会在下次使用时重新下载或重建，首次打开可能略慢。文档、邮件、账户设置不受影响。", impact_en = "Close Office first; add-ins/templates are re-downloaded or rebuilt on demand, so the first launch may be slightly slower. Documents, mail, and account settings are unaffected.", exclude_notes_zh = "不触碰 16.0\\WEF（旁加载加载项）、OfficeFileCache、Outlook 数据、OneNote 笔记本、文档或账户设置。", exclude_notes_en = "16.0\\WEF (sideloaded add-ins), OfficeFileCache, Outlook data, OneNote notebooks, documents, and account settings are never touched.", source = "Microsoft Office user cache layout; Microsoft Q&A SolutionPackages guidance" }
+action = { type = "trash" }
