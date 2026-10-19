@@ -14,10 +14,13 @@ src-tauri（Tauri 命令 / AppState）
 
 ## 数据流
 
-1. **全盘扫描**：`scan_volume` 在阻塞线程执行并行 walker；完整快照留在 Rust
-   进程的 `AppState.snapshots`，前端只收到裁剪后的摘要（Top 目录 2 层、200 个大文件）。
-2. **Treemap**：`get_treemap(snapshot_id)` 从完整快照按预算生成 ≤2500 节点的树，
-   每层最多 50 个子节点；超出标记 `truncated`。
+1. **全盘扫描**：`scan_volume` 在阻塞线程执行并行 walker；完整快照缓存在
+   `AppState.full_snapshot`（最多一份），并压缩写入 `<数据目录>\scans\<id>.json.gz`
+   （保留最近 5 份）。前端只收到裁剪后的摘要（Top 目录 2 层、200 个大文件）。
+2. **Treemap**：`get_treemap(snapshot_id)` 从完整快照生成初始 ≤2500 节点、每层最多
+   50 个子节点的树；`get_treemap_children(snapshot_id, path)` 按点击的目录懒加载
+   下一层（每层最多 200 个目录），实现不限层级的深度下钻。历史扫描若没有完整
+   sidecar，会回退到 3 层摘要并返回 `full=false`。
 3. **快速扫描**：`quick_scan` 加载内置 + 用户规则，按规则根目录遍历，生成
    `Finding`（含 E1–E8 证据）和精确文件列表；文件列表只留在 Rust 侧。
 4. **计划**：`create_plan(finding_ids)` 重新校验每个文件仍在允许根目录内、不是

@@ -515,7 +515,37 @@ Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |
   与 `config.json` 作为 redline 断言零命中。
 - `cargo test -p disksage-rules --test builtin_fixtures --test quick_scan` 通过。
 
-## 八、参考
+## 八、Treemap 深度下钻（2026-10-19）
+
+实现：
+
+- **完整快照 sidecar**：`src-tauri/src/snapshot_cache.rs`
+  - 扫描完成后把完整 `ScanSnapshot` JSON 用 gzip 压缩写入
+    `<数据目录>\scans\<id>.json.gz`，保留最近 5 份。
+  - SQLite 仍只保存 3 层摘要，历史页/仪表盘不受影响。
+  - 应用内最多缓存一份完整树（`AppState.full_snapshot`），避免多份 20 万节点树占内存。
+- **懒加载 API**：`get_treemap_children(snapshot_id, path)`
+  - 只在快照树中按路径查找目录，绝不把前端路径用于文件系统访问。
+  - 每层返回最多 200 个直接子目录，按大小降序；`has_children` 表示还能继续下钻。
+  - 返回 `full=false` 表示该扫描只有摘要，前端提示重新扫描。
+- **前端**：`ExplorePage.tsx`
+  - ECharts `nodeClick: false`，自定义点击处理：点击有子目录的区块 → 调
+    `get_treemap_children` → 合并到树 → `treemapZoomToNode`。
+  - 初始 `get_treemap` 仍只返回 3 层，保证首屏流畅；点击后按需加载。
+  - 点击加载时显示 `正在加载 <path>…`；历史扫描只有摘要时显示提示。
+- **持久化与回退**：
+  - 新扫描在内存中直接使用完整树，无需解压。
+  - 重启后首次打开 treemap 会解压对应 sidecar；超过 5 份的旧扫描回退到 3 层摘要。
+
+测试：
+
+- `snapshot_cache` gzip roundtrip 与保留数量测试通过。
+- `find_dir_node` 大小写不敏感路径查找测试通过。
+- `treemap_children` 根目录/嵌套目录/摘要限制测试通过。
+- 前端 `typecheck`、`test`、`build` 通过。
+- 按要求本阶段未构建安装包。
+
+## 九、参考
 
 - 现有实现状态：`.claude/plans/implementation-status.md`
 - 规则引擎与安全边界：`.claude/plans/disk-cleaner-implementation.md` 第 8 节

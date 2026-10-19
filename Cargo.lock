@@ -551,6 +551,7 @@ dependencies = [
  "disksage-llm",
  "disksage-rules",
  "disksage-scan",
+ "flate2",
  "rusqlite",
  "serde",
  "serde_json",
@@ -558,6 +559,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "tempfile",
  "uuid",
  "windows",
 ]

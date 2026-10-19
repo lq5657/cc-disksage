@@ -1,17 +1,18 @@
 mod auto_clean;
 mod elevation;
+mod snapshot_cache;
 mod storage;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use disksage_clean::{
     AuditLog, CleanupProgress, ExecutionOptions, PlanCandidate, create_plan as build_plan,
     execute_plan as run_plan, execute_plan_with_progress as run_plan_with_progress,
 };
-use disksage_core::path_safety::is_strict_descendant;
+use disksage_core::path_safety::{is_strict_descendant, normalize_for_compare};
 use disksage_core::{
     ActionSpec, CleanupPlan, CleanupResult, DirNode, Evidence, EvidenceKind, EvidenceSource,
     Finding, GuideId, LargeFile, LlmAssessment, MatchedPath, PlanWarning, Recoverability,
@@ -45,6 +46,9 @@ struct AppState {
     plans: Mutex<HashMap<String, CleanupPlan>>,
     assessments: Mutex<HashMap<String, LlmAssessment>>,
     snapshots: Mutex<HashMap<String, ScanSnapshot>>,
+    /// At most one full scan tree is cached; older scans are loaded from the
+    /// compressed sidecar on demand.
+    full_snapshot: Mutex<Option<(String, Arc<ScanSnapshot>)>>,
     scan_cancel: Mutex<Option<CancelToken>>,
     duplicate_scans: Mutex<HashMap<String, DuplicateScanResult>>,
     duplicate_cancel: Mutex<Option<CancelToken>>,
@@ -58,6 +62,7 @@ impl AppState {
             plans: Mutex::new(HashMap::new()),
             assessments: Mutex::new(HashMap::new()),
             snapshots: Mutex::new(HashMap::new()),
+            full_snapshot: Mutex::new(None),
             scan_cancel: Mutex::new(None),
             duplicate_scans: Mutex::new(HashMap::new()),
             duplicate_cancel: Mutex::new(None),
@@ -66,12 +71,13 @@ impl AppState {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct TreemapNode {
     name: String,
     path: String,
     value: u64,
     file_count: u64,
+    has_children: bool,
     children: Vec<TreemapNode>,
 }
 
@@ -81,6 +87,10 @@ struct TreemapResponse {
     total_bytes: u64,
     file_count: u64,
     truncated: bool,
+    /// True when the response came from a full snapshot (in memory or the
+    /// compressed sidecar). False means only the 3-level SQLite summary is
+    /// available and deeper drill-down is impossible.
+    full: bool,
 }
 
 fn prune_snapshot(snapshot: &ScanSnapshot) -> ScanSnapshot {
@@ -137,6 +147,7 @@ fn to_treemap(
         path: node.path.display().to_string(),
         value: node.allocated_bytes.max(1),
         file_count: node.file_count,
+        has_children: !node.children.is_empty(),
         children,
     }
 }
@@ -258,7 +269,13 @@ async fn scan_volume(
         *guard = None;
     }
 
-    let snapshot = scan_result?.map_err(|error| error.to_string())?;
+    let snapshot = Arc::new(scan_result?.map_err(|error| error.to_string())?);
+    if let Ok(mut cached) = state.full_snapshot.lock() {
+        *cached = Some((snapshot.id.clone(), Arc::clone(&snapshot)));
+    }
+    if let Err(error) = snapshot_cache::save(&snapshot) {
+        eprintln!("failed to persist full scan: {error}");
+    }
     let summary = prune_snapshot(&snapshot);
     state
         .snapshots
@@ -300,20 +317,26 @@ fn get_treemap(
     state: tauri::State<'_, AppState>,
     snapshot_id: String,
 ) -> Result<TreemapResponse, String> {
-    let snapshot = {
-        let snapshots = state
-            .snapshots
-            .lock()
-            .map_err(|_| "snapshot store lock poisoned".to_string())?;
-        snapshots.get(&snapshot_id).cloned()
-    };
-    let snapshot = match snapshot {
-        Some(snapshot) => snapshot,
-        None => state
-            .storage
-            .load_scan(&snapshot_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "snapshot not found; run a full scan first".to_string())?,
+    let (snapshot, full_available) = match load_full_snapshot(&state, &snapshot_id)? {
+        Some(snapshot) => (snapshot, true),
+        None => {
+            let cached = {
+                let snapshots = state
+                    .snapshots
+                    .lock()
+                    .map_err(|_| "snapshot store lock poisoned".to_string())?;
+                snapshots.get(&snapshot_id).cloned()
+            };
+            let snapshot = match cached {
+                Some(snapshot) => snapshot,
+                None => state
+                    .storage
+                    .load_scan(&snapshot_id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "snapshot not found; run a full scan first".to_string())?,
+            };
+            (Arc::new(snapshot), false)
+        }
     };
 
     let mut budget = 2500usize;
@@ -330,11 +353,178 @@ fn get_treemap(
             path: format!("{}:\\", snapshot.volume),
             value: snapshot.allocated_bytes.max(1),
             file_count: snapshot.file_count,
+            has_children: !snapshot.top_dirs.is_empty(),
             children,
         },
         total_bytes: snapshot.allocated_bytes,
         file_count: snapshot.file_count,
         truncated,
+        full: full_available,
+    })
+}
+
+const MAX_TREEMAP_CHILDREN: usize = 200;
+
+#[derive(Debug, Serialize)]
+struct TreemapChildrenResponse {
+    path: String,
+    name: String,
+    value: u64,
+    file_count: u64,
+    children: Vec<TreemapNode>,
+    truncated: bool,
+    full: bool,
+}
+
+fn find_dir_node<'a>(nodes: &'a [DirNode], target: &str) -> Option<&'a DirNode> {
+    for node in nodes {
+        let node_path = normalize_for_compare(&node.path);
+        if node_path == target {
+            return Some(node);
+        }
+        if target
+            .strip_prefix(&node_path)
+            .is_some_and(|rest| rest.starts_with('\\'))
+            && let Some(found) = find_dir_node(&node.children, target)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn child_treemap_node(node: &DirNode) -> TreemapNode {
+    TreemapNode {
+        name: node.name.clone(),
+        path: node.path.display().to_string(),
+        value: node.allocated_bytes.max(1),
+        file_count: node.file_count,
+        has_children: !node.children.is_empty(),
+        children: Vec::new(),
+    }
+}
+
+fn load_full_snapshot(
+    state: &AppState,
+    snapshot_id: &str,
+) -> Result<Option<Arc<ScanSnapshot>>, String> {
+    {
+        let cached = state
+            .full_snapshot
+            .lock()
+            .map_err(|_| "full snapshot lock poisoned".to_string())?;
+        if let Some((id, snapshot)) = cached.as_ref()
+            && id == snapshot_id
+        {
+            return Ok(Some(Arc::clone(snapshot)));
+        }
+    }
+
+    let loaded = match snapshot_cache::load(snapshot_id) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("failed to load full snapshot {snapshot_id}: {error}");
+            None
+        }
+    };
+    let Some(snapshot) = loaded else {
+        return Ok(None);
+    };
+
+    let snapshot = Arc::new(snapshot);
+    let mut cached = state
+        .full_snapshot
+        .lock()
+        .map_err(|_| "full snapshot lock poisoned".to_string())?;
+    *cached = Some((snapshot_id.to_string(), Arc::clone(&snapshot)));
+    Ok(Some(snapshot))
+}
+
+#[tauri::command]
+fn get_treemap_children(
+    state: tauri::State<'_, AppState>,
+    snapshot_id: String,
+    path: String,
+) -> Result<TreemapChildrenResponse, String> {
+    let full = load_full_snapshot(&state, &snapshot_id)?;
+    let full_available = full.is_some();
+    let snapshot = match full {
+        Some(snapshot) => snapshot,
+        None => {
+            let cached = {
+                let snapshots = state
+                    .snapshots
+                    .lock()
+                    .map_err(|_| "snapshot store lock poisoned".to_string())?;
+                snapshots.get(&snapshot_id).cloned()
+            };
+            let snapshot = match cached {
+                Some(snapshot) => snapshot,
+                None => state
+                    .storage
+                    .load_scan(&snapshot_id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "扫描结果不存在，请重新扫描".to_string())?,
+            };
+            Arc::new(snapshot)
+        }
+    };
+
+    treemap_children(&snapshot, &path, full_available)
+}
+
+fn treemap_children(
+    snapshot: &ScanSnapshot,
+    path: &str,
+    full_available: bool,
+) -> Result<TreemapChildrenResponse, String> {
+    let target = normalize_for_compare(Path::new(path));
+    let root_path = normalize_for_compare(&PathBuf::from(format!("{}:\\", snapshot.volume)));
+
+    let (response_path, name, value, file_count, source): (String, String, u64, u64, &[DirNode]) =
+        if target == root_path {
+            (
+                format!("{}:\\", snapshot.volume),
+                format!("{}: 空间分布", snapshot.volume),
+                snapshot.allocated_bytes,
+                snapshot.file_count,
+                &snapshot.top_dirs,
+            )
+        } else {
+            let node = find_dir_node(&snapshot.top_dirs, &target).ok_or_else(|| {
+                if full_available {
+                    "目录不在扫描结果中".to_string()
+                } else {
+                    "该历史扫描仅保留前 3 层摘要，请重新扫描后再下钻".to_string()
+                }
+            })?;
+            (
+                node.path.display().to_string(),
+                node.name.clone(),
+                node.allocated_bytes,
+                node.file_count,
+                &node.children,
+            )
+        };
+
+    let mut children = source.iter().collect::<Vec<_>>();
+    children.sort_by(|left, right| {
+        right
+            .allocated_bytes
+            .cmp(&left.allocated_bytes)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    let truncated = children.len() > MAX_TREEMAP_CHILDREN;
+    children.truncate(MAX_TREEMAP_CHILDREN);
+
+    Ok(TreemapChildrenResponse {
+        path: response_path,
+        name,
+        value,
+        file_count,
+        children: children.into_iter().map(child_treemap_node).collect(),
+        truncated,
+        full: full_available,
     })
 }
 
@@ -1428,7 +1618,13 @@ async fn scan_volume_mft(
         ));
     }
 
-    let snapshot = run_mft_scan_job(letter).await?;
+    let snapshot = Arc::new(run_mft_scan_job(letter).await?);
+    if let Ok(mut cached) = state.full_snapshot.lock() {
+        *cached = Some((snapshot.id.clone(), Arc::clone(&snapshot)));
+    }
+    if let Err(error) = snapshot_cache::save(&snapshot) {
+        eprintln!("failed to persist full MFT scan: {error}");
+    }
     let summary = prune_snapshot(&snapshot);
     state
         .snapshots
@@ -2010,6 +2206,7 @@ pub fn run() {
             get_latest_scan,
             get_scan_history,
             get_treemap,
+            get_treemap_children,
             quick_scan,
             quick_scan_admin,
             get_finding,
@@ -2246,5 +2443,87 @@ mod tests {
             std::path::Path::new(r"D:\VMs\disk.vhdx"),
             &env
         ));
+    }
+
+    fn dir(path: &str, children: Vec<DirNode>) -> DirNode {
+        DirNode {
+            name: path.rsplit('\\').next().unwrap_or(path).to_string(),
+            path: PathBuf::from(path),
+            allocated_bytes: 1,
+            logical_bytes: 1,
+            file_count: 1,
+            children,
+        }
+    }
+
+    #[test]
+    fn finds_deep_treemap_node_case_insensitively() {
+        let leaf = dir(r"C:\root\mid\leaf", Vec::new());
+        let mid = dir(r"C:\root\mid", vec![leaf]);
+        let root = dir(r"C:\root", vec![mid]);
+        let target = normalize_for_compare(Path::new(r"c:\ROOT\MID\LEAF"));
+
+        let nodes = [root];
+        let found = find_dir_node(&nodes, &target).expect("deep node must be found");
+        assert_eq!(found.name, "leaf");
+    }
+
+    #[test]
+    fn treemap_children_report_has_children() {
+        let leaf = dir(r"C:\root\leaf", Vec::new());
+        let root = dir(r"C:\root", vec![leaf]);
+
+        let parent = child_treemap_node(&root);
+        assert!(parent.has_children);
+        assert!(parent.children.is_empty());
+
+        let leaf_node = child_treemap_node(&root.children[0]);
+        assert!(!leaf_node.has_children);
+    }
+
+    fn snapshot_with(top_dirs: Vec<DirNode>) -> ScanSnapshot {
+        ScanSnapshot {
+            id: "treemap-test".into(),
+            volume: 'C',
+            engine: "walker".into(),
+            started_at: 0,
+            duration_ms: 0,
+            total_bytes: 10,
+            allocated_bytes: 10,
+            free_bytes: 0,
+            file_count: 3,
+            dir_count: 3,
+            error_count: 0,
+            node_limit_hit: false,
+            top_dirs,
+            large_files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn treemap_children_returns_root_and_nested_levels() {
+        let leaf = dir(r"C:\Users\alice", Vec::new());
+        let users = dir(r"C:\Users", vec![leaf]);
+        let windows = dir(r"C:\Windows", Vec::new());
+        let snapshot = snapshot_with(vec![windows, users]);
+
+        let root = treemap_children(&snapshot, r"C:\", true).unwrap();
+        assert_eq!(root.path, r"C:\");
+        assert_eq!(root.children.len(), 2);
+        assert_eq!(root.children[0].name, "Users");
+        assert!(root.children[0].has_children);
+
+        let nested = treemap_children(&snapshot, r"C:\Users", true).unwrap();
+        assert_eq!(nested.path, r"C:\Users");
+        assert_eq!(nested.children.len(), 1);
+        assert_eq!(nested.children[0].name, "alice");
+        assert!(!nested.children[0].has_children);
+    }
+
+    #[test]
+    fn treemap_children_reports_summary_limitation() {
+        let snapshot = snapshot_with(vec![dir(r"C:\Users", Vec::new())]);
+        let error = treemap_children(&snapshot, r"C:\Users\missing", false).unwrap_err();
+        assert!(error.contains("摘要"));
     }
 }

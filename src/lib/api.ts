@@ -264,6 +264,7 @@ export interface TreemapNode {
   path: string;
   value: number;
   file_count: number;
+  has_children: boolean;
   children: TreemapNode[];
 }
 
@@ -272,10 +273,31 @@ export interface TreemapResponse {
   total_bytes: number;
   file_count: number;
   truncated: boolean;
+  full: boolean;
+}
+
+export interface TreemapChildrenResponse {
+  path: string;
+  name: string;
+  value: number;
+  file_count: number;
+  children: TreemapNode[];
+  truncated: boolean;
+  full: boolean;
 }
 
 export async function getTreemap(snapshotId: string): Promise<TreemapResponse> {
   return invoke<TreemapResponse>("get_treemap", { snapshotId });
+}
+
+export async function getTreemapChildren(
+  snapshotId: string,
+  path: string,
+): Promise<TreemapChildrenResponse> {
+  return invoke<TreemapChildrenResponse>("get_treemap_children", {
+    snapshotId,
+    path,
+  });
 }
 
 export interface AuditEntry {

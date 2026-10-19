@@ -37,6 +37,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 | 深度清理批次 1 | 新增 9 条规则：Edge/Chrome 组件与扩展 CRX 缓存、Edge/Chrome GPU 与着色器缓存、Windows 维护/更新日志、Prefetch、Panther、LiveKernelReports、Windows SystemTemp；新增 `rules/tests` fixture 与 `builtin_fixtures.rs` 测试骨架 |
 | 深度清理批次 2 | 新增 `apps.office_cache`（SolutionPackages/WebServiceCache/SmartLookupCache/OTele/OneNote cache）；扩展 `system.servicing_logs`（PITR/NetSetup/WinREAgent/waasmediccapsule/SetupRecoveryDataTask）；新增 `system.upgrade_leftovers`（仅引导 cleanmgr）；INetCache 评估后不纳入；Package Cache/VS Packages 明确不自动删除 |
 | 深度清理批次 3 | 扩展 `system.servicing_logs` 加入 `ProgramData\USOShared\Logs`；新增 `apps.onedrive_logs`（OneDrive 日志/遥测与 setup 日志）；排除 USOPrivate\UpdateStore、OneDrive keystore/JSON/INI；UWP LocalCache 不做通用规则 |
+| Treemap 深度下钻 | 完整快照压缩保存到 `<数据目录>\scans\<id>.json.gz`（保留最近 5 份）；新增 `get_treemap_children` 按点击目录懒加载，每层最多 200 个目录；前端 ECharts 点击加载并缩放；无完整 sidecar 的历史扫描回退 3 层摘要并提示重新扫描 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
@@ -78,6 +79,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 深度清理批次 1：`cargo test --workspace` 通过（新增 `builtin_fixtures` 测试）；真机 quick scan 实测 Edge 组件/扩展缓存 177.3 MB、Chrome 组件/扩展缓存 77.7 MB、Chrome GPU 缓存 8.2 MB、Edge GPU 缓存 2.1 MB、Windows 维护/更新日志 606.9 MB / 114 文件；管理员日志项待提权实测，Win10 路径待核验
 - 深度清理批次 2：真机 quick scan 实测 Office 缓存 532.7 MB / 4768 文件、扩展后的 Windows 维护/更新日志 607.1 MB / 116 文件；`system.upgrade_leftovers` 在本机无残留；INetCache 因收益过低（约 34.7 KB）未纳入；Package Cache/VS Packages 不自动删除；`cargo test`、clippy 通过
 - 深度清理批次 3：真机 quick scan 实测扩展后的维护/更新日志 662.5 MB / 159 文件、OneDrive 日志 11.7 MB / 75 文件；USOPrivate\UpdateStore、OneDrive keystore/JSON/INI 作为红线排除；`cargo test`、clippy 通过
+- Treemap 深度下钻：`snapshot_cache` roundtrip/prune、`find_dir_node`、`treemap_children` 单测通过；前端 `typecheck`、`test`、`build` 通过；按要求暂未构建安装包
 
 ## 未完成（下一阶段）
 
@@ -103,7 +105,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 大文件 AI 默认不发送文件名（payload 中为 `<file>`）；需要更准确判断时在设置页开启「发送样本文件名」。
 - DISM 操作可能返回 3010（需要重启），不会自动重启；超时 15 分钟会终止并提示检查 `dism.log`。
 - treemap 使用逻辑大小；硬链接/稀疏文件的分配大小精确统计属于后续优化。
-- SQLite 只保存扫描摘要（前 3 层目录），不是完整目录树；当前 treemap 下钻深度与之一致。
+- SQLite 只保存扫描摘要（前 3 层目录）；完整目录树另存为压缩 sidecar，保留最近 5 份。超过 5 次或旧版本扫描只能回退摘要下钻 3 层。
 - SQLite 每个表保留最近 20 条；重复文件结果含本地路径，删除 `disksage.db` 可清空。
 - 重复文件默认只扫描文档/下载/图片/视频/桌面；不扫描 AppData 与应用内部目录，可能漏掉部分重复项。
 - 重复扫描会读取候选文件内容做哈希；结果保存在 SQLite，重启后恢复最近一次。

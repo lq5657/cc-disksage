@@ -6,6 +6,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { AlertTriangle, BarChart3, Loader2, ScanLine } from "lucide-react";
 import {
   getTreemap,
+  getTreemapChildren,
   type ScanSnapshot,
   type TreemapNode,
   type TreemapResponse,
@@ -16,12 +17,33 @@ echarts.use([TreemapChart, TooltipComponent, CanvasRenderer]);
 
 function toSeriesData(node: TreemapNode): unknown {
   return {
+    id: node.path,
     name: node.name,
     value: node.value,
     path: node.path,
     fileCount: node.file_count,
+    hasChildren: node.has_children,
     children: node.children.map(toSeriesData),
   };
+}
+
+function withChildren(
+  nodes: TreemapNode[],
+  path: string,
+  children: TreemapNode[],
+): TreemapNode[] {
+  return nodes.map((node) => {
+    if (node.path === path) {
+      return { ...node, has_children: children.length > 0, children };
+    }
+    if (node.children.length > 0) {
+      return {
+        ...node,
+        children: withChildren(node.children, path, children),
+      };
+    }
+    return node;
+  });
 }
 
 export default function ExplorePage({
@@ -35,8 +57,11 @@ export default function ExplorePage({
 }) {
   const [treemap, setTreemap] = useState<TreemapResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  const chartInstance = useRef<ReturnType<typeof echarts.init> | null>(null);
+  const pendingZoomRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!snapshot) {
@@ -44,6 +69,7 @@ export default function ExplorePage({
       return;
     }
     let cancelled = false;
+    pendingZoomRef.current = null;
     setLoading(true);
     setError(null);
     getTreemap(snapshot.id)
@@ -62,9 +88,60 @@ export default function ExplorePage({
   }, [snapshot]);
 
   useEffect(() => {
-    if (!treemap || !chartRef.current) return;
+    if (!snapshot || !chartRef.current) return;
 
+    const snapshotId = snapshot.id;
     const chart = echarts.init(chartRef.current);
+    chartInstance.current = chart;
+
+    const handleClick = (params: any) => {
+      const data = params?.data;
+      if (!data?.path || !data.hasChildren) return;
+
+      setError(null);
+      setLoadingPath(data.path);
+      getTreemapChildren(snapshotId, data.path)
+        .then((response) => {
+          if (!response.full) {
+            setError("该历史扫描仅保留前 3 层摘要，请重新扫描后再下钻。");
+            return;
+          }
+          setTreemap((previous) => {
+            if (!previous) return previous;
+            return {
+              ...previous,
+              root: {
+                ...previous.root,
+                children: withChildren(
+                  previous.root.children,
+                  response.path,
+                  response.children,
+                ),
+              },
+            };
+          });
+          pendingZoomRef.current = response.path;
+        })
+        .catch((loadError) => setError(String(loadError)))
+        .finally(() => setLoadingPath(null));
+    };
+
+    chart.on("click", handleClick);
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(chartRef.current);
+    return () => {
+      observer.disconnect();
+      chart.off("click", handleClick);
+      chart.dispose();
+      chartInstance.current = null;
+      pendingZoomRef.current = null;
+    };
+  }, [snapshot?.id]);
+
+  useEffect(() => {
+    const chart = chartInstance.current;
+    if (!treemap || !chart) return;
+
     const option = {
       color: [
         "#047857",
@@ -94,7 +171,7 @@ export default function ExplorePage({
           type: "treemap",
           data: treemap.root.children.map(toSeriesData),
           roam: false,
-          nodeClick: "zoomToNode",
+          nodeClick: false,
           breadcrumb: {
             show: true,
             bottom: 4,
@@ -132,13 +209,15 @@ export default function ExplorePage({
       ],
     } as echarts.EChartsCoreOption;
 
-    chart.setOption(option);
-    const observer = new ResizeObserver(() => chart.resize());
-    observer.observe(chartRef.current);
-    return () => {
-      observer.disconnect();
-      chart.dispose();
-    };
+    chart.setOption(option, true);
+    const pending = pendingZoomRef.current;
+    if (pending) {
+      chart.dispatchAction({
+        type: "treemapZoomToNode",
+        targetNodeId: pending,
+      } as any);
+      pendingZoomRef.current = null;
+    }
   }, [treemap]);
 
   if (!snapshot) {
@@ -209,6 +288,11 @@ export default function ExplorePage({
             </div>
           </div>
         ) : null}
+        {loadingPath ? (
+          <div className="absolute right-3 top-3 z-10 max-w-[70%] truncate rounded-lg bg-emerald-950/80 px-3 py-1.5 text-xs text-white">
+            正在加载 {loadingPath}…
+          </div>
+        ) : null}
         <div ref={chartRef} className="h-[540px] w-full" />
       </section>
 
@@ -231,7 +315,13 @@ export default function ExplorePage({
 
       {treemap?.truncated ? (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          为保证流畅，treemap 仅渲染占用最大的目录层级；完整数据保留在本地扫描快照中。
+          为保证流畅，每个层级最多显示占用最大的 200 个目录；点击区块可继续加载下一层。
+        </p>
+      ) : null}
+
+      {treemap && !treemap.full ? (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          该扫描只保留了前 3 层摘要，无法继续深度下钻；重新扫描后可加载完整目录树。
         </p>
       ) : null}
     </div>
