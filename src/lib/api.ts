@@ -136,6 +136,56 @@ export async function scanVolumeMft(volume: string): Promise<ScanSnapshot> {
   return invoke<ScanSnapshot>("scan_volume_mft", { volume });
 }
 
+export interface DiscoveryProgress {
+  files: number;
+  dirs: number;
+  elapsed_ms: number;
+  current: string;
+}
+
+export interface DiscoveryItem {
+  index: number;
+  path: string;
+  name: string;
+  bytes: number;
+  modified_at: number | null;
+  extension: string;
+  category:
+    | "large_file"
+    | "large_log"
+    | "dump"
+    | "old_installer"
+    | "old_archive";
+  reason_zh: string;
+  reason_en: string;
+}
+
+export interface DiscoveryResult {
+  volume: string;
+  scanned_files: number;
+  scanned_dirs: number;
+  elapsed_ms: number;
+  items: DiscoveryItem[];
+  truncated: boolean;
+}
+
+export async function deepInspect(
+  volume: string,
+  onProgress?: (progress: DiscoveryProgress) => void,
+): Promise<DiscoveryResult> {
+  const channel = new Channel<DiscoveryProgress>();
+  if (onProgress) channel.onmessage = onProgress;
+  return invoke<DiscoveryResult>("deep_inspect", { volume, onProgress: channel });
+}
+
+export async function cancelDeepInspect(): Promise<void> {
+  return invoke("cancel_deep_inspect");
+}
+
+export async function openDiscoveryItem(index: number): Promise<void> {
+  return invoke("open_discovery_item", { index });
+}
+
 export interface ScanHistoryEntry {
   id: string;
   volume: string;

@@ -1,11 +1,15 @@
 //! Volume and filesystem scanning.
 
+pub mod discovery;
 pub mod duplicates;
 #[cfg(windows)]
 pub mod mft;
 pub mod volumes;
 pub mod walker;
 
+pub use discovery::{
+    DiscoveryItem, DiscoveryProgress, DiscoveryRequest, DiscoveryResult, run_discovery,
+};
 pub use disksage_core as core;
 pub use duplicates::{
     DuplicateFile, DuplicateGroup, DuplicateRequest, DuplicateScanProgress, DuplicateScanResult,

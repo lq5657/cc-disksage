@@ -75,6 +75,10 @@ src-tauri（Tauri 命令 / AppState）
    `tauri-plugin-notification` 发送 Windows 通知。
 16. **仪表盘可清理摘要**：快速扫描/管理员扫描完成后，前端把安全/谨慎项汇总写入
     WebView2 localStorage；仪表盘读取该摘要并显示「去清理建议」入口，不保存文件路径。
+17. **只读深度发现**：`deep_inspect(volume)` 在阻塞线程遍历所选卷，按阈值收集大文件、
+   大日志/ETL、转储、旧安装包/压缩包；跳过 WinSxS/Installer/System32/Program Files/
+   受保护目录、reparse point 与聊天数据目录。结果只含路径、大小、时间与分类，
+   保存在 AppState；前端只能按索引打开所在目录，**没有删除入口**。扫描支持进度与取消。
 17. **大文件操作**：仪表盘大文件列表使用快照 ID + 文件索引调用后端：
     - 打开目录：解析快照条目后调用 Explorer `/select`，只读；
     - 移到回收站：构造一个临时的 `large_file.user_selected` 候选，复用

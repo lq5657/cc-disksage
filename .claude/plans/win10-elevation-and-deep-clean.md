@@ -545,7 +545,43 @@ Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |
 - 前端 `typecheck`、`test`、`build` 通过。
 - 按要求本阶段未构建安装包。
 
-## 九、参考
+## 九、只读深度发现（2026-10-19）
+
+实现：
+
+- **扫描器**：`crates/disksage-scan/src/discovery.rs` 的 `run_discovery`
+  - 顺序遍历所选卷；支持进度回调与取消。
+  - 阈值：大文件 ≥100 MB；日志/ETL ≥50 MB；转储 ≥50 MB；安装包/压缩包
+    （msi/exe/iso/msp/msu/appx/msix/zip/7z/rar）≥100 MB 且超过 180 天。
+  - 跳过：`$Recycle.Bin`、`System Volume Information`、`WindowsApps`、`Recovery`、
+    `WinSxS`、`Installer`、`System32`、`SysWOW64`、`servicing`、`DriverStore`、
+    `Program Files`、`Program Files (x86)`、`node_modules`、`.git`、`.svn`、`.hg`、
+    `target`，以及腾讯/微信/QQ/钉钉/WPS 云文档目录。
+  - 不跟随 reparse point；跳过 `pagefile.sys`/`hiberfil.sys`/`swapfile.sys`。
+  - 分类：`large_file` / `large_log` / `dump` / `old_installer` / `old_archive`，
+    每个条目只包含路径、大小、修改时间、扩展名、分类和说明。
+- **Tauri 命令**：
+  - `deep_inspect(volume, on_progress)`：只读扫描，结果保存到 `AppState.deep_results`。
+  - `cancel_deep_inspect`。
+  - `open_discovery_item(index)`：只接受结果索引，校验文件仍存在后打开资源管理器；
+    **没有删除命令**。
+- **前端**：新增「深度发现」页
+  - 开始/取消扫描、实时进度、扫描统计、分类筛选、候选列表、打开所在目录。
+  - 明确提示只读、不删除；阈值和跳过范围写在页面上。
+
+真机验证：
+
+- C 盘只读扫描：279,058 文件 / 53,898 目录 / 49 项候选 / 36.3s（debug）。
+- 单测：分类与受保护路径跳过、取消、`C:` 根路径归一化。
+- 前端 `typecheck`、`test`、`build` 通过。
+
+边界：
+
+- 结果不持久化；重启后需重新扫描。
+- 不提供删除、勾选或自动清理；如需清理，仍走规则引擎或用户手动操作。
+- 不做内容读取、哈希或 AI 判断；只展示元数据。
+
+## 十、参考
 
 - 现有实现状态：`.claude/plans/implementation-status.md`
 - 规则引擎与安全边界：`.claude/plans/disk-cleaner-implementation.md` 第 8 节

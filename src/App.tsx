@@ -9,6 +9,7 @@ import {
   History,
   Loader2,
   ScanLine,
+  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -28,6 +29,7 @@ import LargeFilesPanel from "./components/LargeFilesPanel";
 import { formatBytes, formatPercent } from "./lib/format";
 import { loadQuickScanSummary } from "./lib/quickScanSummary";
 import CleanupPage from "./pages/CleanupPage";
+import DeepDiscoveryPage from "./pages/DeepDiscoveryPage";
 import DuplicatesPage from "./pages/DuplicatesPage";
 import ExplorePage from "./pages/ExplorePage";
 import HistoryPage from "./pages/HistoryPage";
@@ -36,6 +38,7 @@ import SettingsPage from "./pages/SettingsPage";
 type PageId =
   | "dashboard"
   | "explore"
+  | "discovery"
   | "cleanup"
   | "duplicates"
   | "history"
@@ -48,6 +51,7 @@ const NAV: Array<{
 }> = [
   { id: "dashboard", label: "仪表盘", icon: Gauge },
   { id: "explore", label: "空间分析", icon: BarChart3 },
+  { id: "discovery", label: "深度发现", icon: Search },
   { id: "cleanup", label: "清理建议", icon: Sparkles },
   { id: "duplicates", label: "重复文件", icon: Copy },
   { id: "history", label: "历史记录", icon: History },
@@ -616,6 +620,8 @@ export default function App() {
               onOpenCleanup={() => setActive("cleanup")}
               onSnapshotChange={(next) => setSnapshot(next)}
             />
+          ) : active === "discovery" ? (
+            <DeepDiscoveryPage volume={volume} />
           ) : active === "cleanup" ? (
             <CleanupPage />
           ) : active === "duplicates" ? (

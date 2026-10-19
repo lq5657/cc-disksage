@@ -38,6 +38,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 | 深度清理批次 2 | 新增 `apps.office_cache`（SolutionPackages/WebServiceCache/SmartLookupCache/OTele/OneNote cache）；扩展 `system.servicing_logs`（PITR/NetSetup/WinREAgent/waasmediccapsule/SetupRecoveryDataTask）；新增 `system.upgrade_leftovers`（仅引导 cleanmgr）；INetCache 评估后不纳入；Package Cache/VS Packages 明确不自动删除 |
 | 深度清理批次 3 | 扩展 `system.servicing_logs` 加入 `ProgramData\USOShared\Logs`；新增 `apps.onedrive_logs`（OneDrive 日志/遥测与 setup 日志）；排除 USOPrivate\UpdateStore、OneDrive keystore/JSON/INI；UWP LocalCache 不做通用规则 |
 | Treemap 深度下钻 | 完整快照压缩保存到 `<数据目录>\scans\<id>.json.gz`（保留最近 5 份）；新增 `get_treemap_children` 按点击目录懒加载，每层最多 200 个目录；前端 ECharts 点击加载并缩放；无完整 sidecar 的历史扫描回退 3 层摘要并提示重新扫描 |
+| 只读深度发现 | 新增 `deep_inspect`：按 100MB 大文件、50MB 日志/转储、100MB+180 天安装包/压缩包阈值只读遍历；跳过 WinSxS/Installer/System32/Program Files/受保护目录、reparse point 与聊天数据目录；结果只含路径/大小/时间/分类，前端只能按索引打开目录，无删除入口；支持进度与取消 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
@@ -80,6 +81,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 深度清理批次 2：真机 quick scan 实测 Office 缓存 532.7 MB / 4768 文件、扩展后的 Windows 维护/更新日志 607.1 MB / 116 文件；`system.upgrade_leftovers` 在本机无残留；INetCache 因收益过低（约 34.7 KB）未纳入；Package Cache/VS Packages 不自动删除；`cargo test`、clippy 通过
 - 深度清理批次 3：真机 quick scan 实测扩展后的维护/更新日志 662.5 MB / 159 文件、OneDrive 日志 11.7 MB / 75 文件；USOPrivate\UpdateStore、OneDrive keystore/JSON/INI 作为红线排除；`cargo test`、clippy 通过
 - Treemap 深度下钻：`snapshot_cache` roundtrip/prune、`find_dir_node`、`treemap_children` 单测通过；前端 `typecheck`、`test`、`build` 通过；按要求暂未构建安装包
+- 只读深度发现：真机 C 盘只读扫描 279,058 文件 / 53,898 目录 / 49 项候选 / 36.3s（debug）；分类、跳过受保护/聊天目录、取消、根路径归一化单测通过；前端 `typecheck`/`test`/`build` 通过；无删除命令
 
 ## 未完成（下一阶段）
 
@@ -108,6 +110,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - SQLite 只保存扫描摘要（前 3 层目录）；完整目录树另存为压缩 sidecar，保留最近 5 份。超过 5 次或旧版本扫描只能回退摘要下钻 3 层。
 - SQLite 每个表保留最近 20 条；重复文件结果含本地路径，删除 `disksage.db` 可清空。
 - 重复文件默认只扫描文档/下载/图片/视频/桌面；不扫描 AppData 与应用内部目录，可能漏掉部分重复项。
+- 只读深度发现按顺序遍历（debug 下 C 盘约 36 秒），跳过 Program Files/WinSxS/System32 与聊天数据目录；结果不持久化，重启后需重新扫描；阈值固定为 100MB/50MB/180 天，暂不支持自定义范围。
 - 重复扫描会读取候选文件内容做哈希；结果保存在 SQLite，重启后恢复最近一次。
 - 自动清理只在计划任务触发时检查低空间阈值，不是常驻监控；任务仅在用户登录时运行。
 - 关闭主窗口只会隐藏到托盘；需通过托盘「退出」或任务管理器结束进程。

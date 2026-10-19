@@ -26,8 +26,9 @@ use disksage_rules::{
     QuickScanResult, load_builtin_rules, load_user_rules, quick_scan as run_quick_scan,
 };
 use disksage_scan::{
-    CancelToken, DuplicateRequest, DuplicateScanProgress, DuplicateScanResult, ScanRequest,
-    find_duplicates, scan_volume as run_scan,
+    CancelToken, DiscoveryItem, DiscoveryProgress, DiscoveryRequest, DiscoveryResult,
+    DuplicateRequest, DuplicateScanProgress, DuplicateScanResult, ScanRequest, find_duplicates,
+    run_discovery, scan_volume as run_scan,
 };
 use serde::Serialize;
 use storage::{ScanHistoryEntry, Storage};
@@ -52,6 +53,8 @@ struct AppState {
     scan_cancel: Mutex<Option<CancelToken>>,
     duplicate_scans: Mutex<HashMap<String, DuplicateScanResult>>,
     duplicate_cancel: Mutex<Option<CancelToken>>,
+    deep_cancel: Mutex<Option<CancelToken>>,
+    deep_results: Mutex<Vec<DiscoveryItem>>,
     storage: Storage,
 }
 
@@ -66,6 +69,8 @@ impl AppState {
             scan_cancel: Mutex::new(None),
             duplicate_scans: Mutex::new(HashMap::new()),
             duplicate_cancel: Mutex::new(None),
+            deep_cancel: Mutex::new(None),
+            deep_results: Mutex::new(Vec::new()),
             storage,
         }
     }
@@ -310,6 +315,104 @@ fn cancel_scan(state: tauri::State<'_, AppState>) -> Result<(), String> {
         token.cancel();
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn deep_inspect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    volume: String,
+    on_progress: tauri::ipc::Channel<DiscoveryProgress>,
+) -> Result<DiscoveryResult, String> {
+    let letter = volume.trim().trim_end_matches(':').to_ascii_uppercase();
+    if letter.len() != 1
+        || !letter
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return Err("invalid volume letter".to_string());
+    }
+
+    let root = format!("{letter}:\\");
+    let cancel = CancelToken::new();
+    *state
+        .deep_cancel
+        .lock()
+        .map_err(|_| "deep discovery cancel lock poisoned".to_string())? = Some(cancel.clone());
+
+    let scan_result = tauri::async_runtime::spawn_blocking(move || {
+        let request = DiscoveryRequest::new(root);
+        run_discovery(
+            request,
+            move |progress| {
+                let _ = on_progress.send(progress);
+            },
+            cancel,
+        )
+    })
+    .await
+    .map_err(|error| format!("deep discovery task failed: {error}"));
+
+    if let Ok(mut guard) = state.deep_cancel.lock() {
+        *guard = None;
+    }
+
+    let result = scan_result??;
+    let total_bytes = result.items.iter().map(|item| item.bytes).sum::<u64>();
+    *state
+        .deep_results
+        .lock()
+        .map_err(|_| "deep discovery result lock poisoned".to_string())? = result.items.clone();
+
+    notify(
+        &app,
+        "深度发现完成",
+        format!(
+            "{}: {} 个候选，共 {}",
+            result.volume,
+            result.items.len(),
+            format_bytes_short(total_bytes)
+        ),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+fn cancel_deep_inspect(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Some(token) = state
+        .deep_cancel
+        .lock()
+        .map_err(|_| "deep discovery cancel lock poisoned".to_string())?
+        .as_ref()
+    {
+        token.cancel();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn open_discovery_item(state: tauri::State<'_, AppState>, index: usize) -> Result<(), String> {
+    let path = {
+        let items = state
+            .deep_results
+            .lock()
+            .map_err(|_| "deep discovery result lock poisoned".to_string())?;
+        items
+            .get(index)
+            .map(|item| PathBuf::from(&item.path))
+            .ok_or_else(|| "深度发现条目不存在，请重新扫描".to_string())?
+    };
+    if !path.is_file() {
+        return Err("文件已不存在，请重新扫描".into());
+    }
+    let windows = std::env::var_os("WINDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    std::process::Command::new(windows.join("explorer.exe"))
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2203,6 +2306,9 @@ pub fn run() {
             get_volumes,
             scan_volume,
             cancel_scan,
+            deep_inspect,
+            cancel_deep_inspect,
+            open_discovery_item,
             get_latest_scan,
             get_scan_history,
             get_treemap,
