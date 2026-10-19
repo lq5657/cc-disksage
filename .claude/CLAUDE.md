@@ -52,9 +52,9 @@ npm run tauri build        # 安装包（目标）
 - 未在真实 Windows/应用版本核验的第三方应用规则不得进入安装包。
 - 新的第三方应用规则先做只读探测与 fixture，再考虑默认勾选；默认风险从 `caution` 起步。
 
-## 当前状态（2026-10-18）
+## 当前状态（2026-10-19）
 
-v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
+v0.3.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.3.0
 
 已实现：
 
@@ -78,6 +78,12 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - 仪表盘可清理摘要与「去清理建议」入口；大文件支持 AI 元数据分析、打开目录、确认后移到回收站
 - 代码签名流水线：signtool + PFX/证书指纹 + 时间戳，Tauri `signCommand` 签 helper/主程序/安装包
 - NSIS 安装包配置（offline WebView2 / lite / helper 侧车）；卸载钩子删除计划任务
+- 提权兼容：PowerShell 优先，PowerShell 不可用时回退 `ShellExecuteExW`；helper 服务控制回退 SCM，
+  回收站回退 `SHEmptyRecycleBinW`；取消 UAC 不重试；`logs/helper-launch.jsonl` 诊断
+- 深度清理规则：浏览器组件/GPU 缓存、Office 缓存、OneDrive 日志、Windows 维护日志、
+  Prefetch/Panther/LiveKernelReports/SystemTemp、升级残留引导；positive/redline fixture
+- Treemap 深度下钻：完整快照 gzip sidecar（最近 5 份）、`get_treemap_children` 按需加载
+- 只读深度发现：大文件/日志/转储/旧安装包扫描，跳过受保护/聊天目录，只展示不删除
 
 未实现：
 
@@ -85,7 +91,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 
 验证基线：
 
-- `cargo test --workspace` 通过（69 项，7 项 ignored）
+- `cargo test --workspace` 通过（含新增规则 fixture、treemap sidecar、只读深度发现单测；耗时/真机测试 ignored）
 - `npm run test` / `npm run build` 通过
 - 真机 C 盘扫描：71 万文件 / 19.9 万目录 / 131GB / 63 秒
 - 回收站删除 API、Windows 凭据管理器 Key 读写已在真机验证

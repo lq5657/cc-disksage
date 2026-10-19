@@ -67,12 +67,12 @@
 
 ## 安装包
 
-发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0>
+发布页：<https://github.com/lq5657/cc-disksage/releases/tag/v0.3.0>
 
 | 文件 | 大小 | 适用场景 |
 |---|---|---|
-| `dist-installers/cc-disksage-0.2.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
-| `dist-installers/cc-disksage-0.2.0-lite-setup.exe` | 约 4.9 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
+| `dist-installers/cc-disksage-0.3.0-offline-setup.exe` | 约 212 MB | 断网 Win10/11；内置 WebView2 离线安装器 |
+| `dist-installers/cc-disksage-0.3.0-lite-setup.exe` | 约 5 MB | 已装 WebView2 的 Win11/企业环境；缺失时 bootstrapper 需联网 |
 
 安装包同时包含 `disksage-helper.exe`（提权清理侧车）。管理员项执行时会弹出 UAC。
 SHA-256 见 `dist-installers/SHA256SUMS.txt`。
@@ -83,7 +83,7 @@ SmartScreen 可能提示。
 安装到 D 盘可使用 NSIS 的 `/D` 参数（必须是最后一个参数）：
 
 ```powershell
-Start-Process .\dist-installers\cc-disksage-0.2.0-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
+Start-Process .\dist-installers\cc-disksage-0.3.0-offline-setup.exe -ArgumentList '/S','/D=D:\CCDiskSage' -Wait
 ```
 
 程序安装在 D 盘时，数据目录自动使用 `D:\CCDiskSageData\<用户名>`；安装在系统盘时使用

@@ -44,9 +44,9 @@ $bundle = Join-Path $root "target\release\bundle\nsis"
 $output = Join-Path $root "dist-installers"
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 
-$artifacts = Get-ChildItem $bundle -Filter "*.exe" -ErrorAction Stop
+$artifacts = Get-ChildItem $bundle -Filter "CC DiskSage_${version}_x64-setup.exe" -ErrorAction Stop
 if (-not $artifacts) {
-    throw "No NSIS installer found in $bundle"
+    throw "No NSIS installer for $version found in $bundle"
 }
 foreach ($artifact in $artifacts) {
     $target = Join-Path $output "cc-disksage-$version-$suffix-setup.exe"
