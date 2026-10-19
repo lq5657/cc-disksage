@@ -154,7 +154,7 @@ requires_admin = true
 default_selected = false
 recoverability = "recycle_bin"
 min_age_days = 3
-detect = { path_exists_any = ["%WINDIR%\\Logs\\CBS", "%WINDIR%\\Logs\\DISM", "%WINDIR%\\Logs\\WindowsUpdate", "%WINDIR%\\Logs\\MoSetup", "%WINDIR%\\Logs\\SIH", "%WINDIR%\\Logs\\waasmedic", "%WINDIR%\\Logs\\waasmediccapsule", "%WINDIR%\\Logs\\PITR", "%WINDIR%\\Logs\\NetSetup", "%WINDIR%\\Logs\\WinREAgent", "%WINDIR%\\Logs\\SetupRecoveryDataTask"] }
+detect = { path_exists_any = ["%WINDIR%\\Logs\\CBS", "%WINDIR%\\Logs\\DISM", "%WINDIR%\\Logs\\WindowsUpdate", "%WINDIR%\\Logs\\MoSetup", "%WINDIR%\\Logs\\SIH", "%WINDIR%\\Logs\\waasmedic", "%WINDIR%\\Logs\\waasmediccapsule", "%WINDIR%\\Logs\\PITR", "%WINDIR%\\Logs\\NetSetup", "%WINDIR%\\Logs\\WinREAgent", "%WINDIR%\\Logs\\SetupRecoveryDataTask", "%PROGRAMDATA%\\USOShared\\Logs"] }
 targets = [
   { root = "%WINDIR%\\Logs\\CBS", include_globs = ["CbsPersist_*.log", "*.cab"], exclude_globs = ["CBS.log"], max_depth = 1 },
   { root = "%WINDIR%\\Logs\\DISM", include_globs = ["*.log"], exclude_globs = [], max_depth = 1 },
@@ -166,9 +166,10 @@ targets = [
   { root = "%WINDIR%\\Logs\\PITR", include_globs = ["*.log", "*.etl"], exclude_globs = [], max_depth = 1 },
   { root = "%WINDIR%\\Logs\\NetSetup", include_globs = ["*.etl", "*.log"], exclude_globs = [], max_depth = 1 },
   { root = "%WINDIR%\\Logs\\WinREAgent", include_globs = ["*.log"], exclude_globs = [], max_depth = 1 },
-  { root = "%WINDIR%\\Logs\\SetupRecoveryDataTask", include_globs = ["*.log"], exclude_globs = [], max_depth = 1 }
+  { root = "%WINDIR%\\Logs\\SetupRecoveryDataTask", include_globs = ["*.log"], exclude_globs = [], max_depth = 1 },
+  { root = "%PROGRAMDATA%\\USOShared\\Logs", include_globs = ["**/*.etl"], exclude_globs = [], max_depth = 2 }
 ]
-explain = { what_zh = "Windows 组件安装、DISM、Windows 更新、恢复与维护日志。", what_en = "Windows component installation, DISM, Windows Update, recovery, and servicing logs.", impact_zh = "删除后历史诊断信息会丢失；不影响系统更新、启动或已安装更新。正在使用的日志会被跳过。", impact_en = "Historical diagnostic information is lost; system updates, boot, and installed updates are unaffected. Logs in use are skipped.", exclude_notes_zh = "不删除 CBS.log、不触碰 WinSxS、MeasuredBoot、SystemRestore 或已安装更新。", exclude_notes_en = "CBS.log, WinSxS, MeasuredBoot, SystemRestore, and installed updates are never touched.", source = "Windows Logs CBS/DISM/WindowsUpdate/MoSetup/SIH/waasmedic/waasmediccapsule/PITR/NetSetup/WinREAgent/SetupRecoveryDataTask layouts" }
+explain = { what_zh = "Windows 组件安装、DISM、Windows 更新、更新协调器、恢复与维护日志。", what_en = "Windows component installation, DISM, Windows Update, Update Orchestrator, recovery, and servicing logs.", impact_zh = "删除后历史诊断信息会丢失；不影响系统更新、启动或已安装更新。正在使用的日志会被跳过。", impact_en = "Historical diagnostic information is lost; system updates, boot, and installed updates are unaffected. Logs in use are skipped.", exclude_notes_zh = "不删除 CBS.log、不触碰 WinSxS、MeasuredBoot、SystemRestore、USOPrivate\\UpdateStore 或已安装更新。", exclude_notes_en = "CBS.log, WinSxS, MeasuredBoot, SystemRestore, USOPrivate\\UpdateStore, and installed updates are never touched.", source = "Windows Logs CBS/DISM/WindowsUpdate/MoSetup/SIH/waasmedic/waasmediccapsule/PITR/NetSetup/WinREAgent/SetupRecoveryDataTask and USOShared\\Logs layouts" }
 action = { type = "trash" }
 
 [[rules]]

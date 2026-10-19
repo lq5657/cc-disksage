@@ -19,6 +19,7 @@ const NEW_RULES: &[&str] = &[
     "system.live_kernel_reports",
     "system.windows_system_temp",
     "apps.office_cache",
+    "apps.onedrive_logs",
     "system.upgrade_leftovers",
 ];
 

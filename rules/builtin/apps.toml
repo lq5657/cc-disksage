@@ -103,3 +103,24 @@ targets = [
 ]
 explain = { what_zh = "Office Web 加载项/模板包缓存、Web 服务缓存、智能查找缓存、遥测缓存与 OneNote 缓存。", what_en = "Office web add-in/template package cache, web service cache, Smart Lookup cache, telemetry cache, and OneNote cache.", impact_zh = "关闭 Office 后清理；加载项/模板会在下次使用时重新下载或重建，首次打开可能略慢。文档、邮件、账户设置不受影响。", impact_en = "Close Office first; add-ins/templates are re-downloaded or rebuilt on demand, so the first launch may be slightly slower. Documents, mail, and account settings are unaffected.", exclude_notes_zh = "不触碰 16.0\\WEF（旁加载加载项）、OfficeFileCache、Outlook 数据、OneNote 笔记本、文档或账户设置。", exclude_notes_en = "16.0\\WEF (sideloaded add-ins), OfficeFileCache, Outlook data, OneNote notebooks, documents, and account settings are never touched.", source = "Microsoft Office user cache layout; Microsoft Q&A SolutionPackages guidance" }
 action = { type = "trash" }
+
+[[rules]]
+id = "apps.onedrive_logs"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / OneDrive 26.178.0913.0007"
+category = "apps"
+title_zh = "OneDrive 日志与遥测缓存"
+title_en = "OneDrive logs and telemetry cache"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Microsoft\\OneDrive\\logs", "%LOCALAPPDATA%\\Microsoft\\OneDrive\\setup\\logs"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Microsoft\\OneDrive\\logs", include_globs = ["**/*.odl", "**/*.aodl", "**/*.otc*", "**/*.txt"], exclude_globs = ["**/*.keystore", "**/*.json", "**/*.ini"], max_depth = 4 },
+  { root = "%LOCALAPPDATA%\\Microsoft\\OneDrive\\setup\\logs", include_globs = ["**/*.log"], exclude_globs = [], max_depth = 2 }
+]
+explain = { what_zh = "OneDrive 的诊断日志、遥测缓存与安装/更新日志。", what_en = "OneDrive diagnostic logs, telemetry cache, and setup/update logs.", impact_zh = "OneDrive 会重新生成日志；同步文件、账户、登录状态和设置不受影响。", impact_en = "OneDrive regenerates the logs; synced files, account, sign-in state, and settings are unaffected.", exclude_notes_zh = "不触碰 .keystore、JSON/INI 配置、同步文件或账户数据。", exclude_notes_en = ".keystore, JSON/INI configuration, synced files, and account data are never touched.", source = "OneDrive user log and setup log layout" }
+action = { type = "trash" }

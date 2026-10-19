@@ -2,7 +2,7 @@
 
 - 日期：2026-10-19
 - 基线：v0.2.0（`a80f75a docs: publish v0.2.0`）
-- 状态：P0（提权/服务/回收站回退）已实现，待禁用 PowerShell 的 Win10 实测；深度清理部分未实现
+- 状态：P0（提权/服务/回收站回退）已实现；深度清理批次 1–3 已实现；待禁用 PowerShell 的 Win10 实测与提权删除实测
 - 对应问题：
   1. Windows 10 点击「管理员全盘扫描」提示「无法启动提权 helper：拒绝访问。(os error 5)」
   2. 扫描/清理不够深，希望发现更多可清理内容
@@ -489,7 +489,33 @@ Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |
   `WinREAgent/diagerr.xml` 作为 redline 断言零命中。
 - `cargo test -p disksage-rules --test builtin_fixtures --test quick_scan` 通过。
 
-## 七、参考
+## 七、深度清理批次 3（2026-10-19）
+
+新增/扩展：
+
+| 规则 | 变化 | 风险 | 管理员 | 默认勾选 | 真机实测（Windows 11 26200） |
+|---|---|---|---|---|---|
+| `system.servicing_logs` | 扩展 `%PROGRAMDATA%\USOShared\Logs`（`**/*.etl`，max_depth=2） | caution | 是 | 否 | 662.5 MB / 159 文件（非提权估算） |
+| `apps.onedrive_logs` | 新增 OneDrive 日志/遥测缓存与 setup 日志 | caution | 否 | 否 | 11.7 MB / 75 文件 |
+
+边界：
+
+- `USOShared\Logs` 只匹配 `.etl` 日志；不触碰 `%PROGRAMDATA%\USOPrivate\UpdateStore`
+  （更新协调器状态库）。
+- OneDrive 规则只匹配 `.odl`、`.aodl`、`.otc*`、`.txt` 与 `setup\logs\*.log`；
+  硬排除 `.keystore`、JSON/INI 配置、同步文件与账户数据。
+- 继续不纳入自动清理：`ProgramData\Package Cache`、`ProgramData\Microsoft\VisualStudio\Packages`
+  （修复/卸载依赖）、`USOPrivate\UpdateStore`、UWP 应用 `LocalCache` 整包
+  （本机仅 Codex 包较大，属于特定应用，不做通用规则）。
+
+测试：
+
+- `apps.onedrive_logs` 已加入 `NEW_RULES` 与 positive/redline fixture。
+- `system.servicing_logs` 的 `USOShared` 目标已补充 positive fixture；`USOPrivate\UpdateStore`
+  与 `config.json` 作为 redline 断言零命中。
+- `cargo test -p disksage-rules --test builtin_fixtures --test quick_scan` 通过。
+
+## 八、参考
 
 - 现有实现状态：`.claude/plans/implementation-status.md`
 - 规则引擎与安全边界：`.claude/plans/disk-cleaner-implementation.md` 第 8 节

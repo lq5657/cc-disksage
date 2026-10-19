@@ -36,6 +36,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 | 提权兼容（P0） | PowerShell 优先 + 原生 `ShellExecuteExW("runas")` 自动回退；helper 服务控制回退 SCM API、回收站回退 `SHEmptyRecycleBinW`；取消 UAC 不重试；实现完成，待禁用 PowerShell 的 Win10 实测 |
 | 深度清理批次 1 | 新增 9 条规则：Edge/Chrome 组件与扩展 CRX 缓存、Edge/Chrome GPU 与着色器缓存、Windows 维护/更新日志、Prefetch、Panther、LiveKernelReports、Windows SystemTemp；新增 `rules/tests` fixture 与 `builtin_fixtures.rs` 测试骨架 |
 | 深度清理批次 2 | 新增 `apps.office_cache`（SolutionPackages/WebServiceCache/SmartLookupCache/OTele/OneNote cache）；扩展 `system.servicing_logs`（PITR/NetSetup/WinREAgent/waasmediccapsule/SetupRecoveryDataTask）；新增 `system.upgrade_leftovers`（仅引导 cleanmgr）；INetCache 评估后不纳入；Package Cache/VS Packages 明确不自动删除 |
+| 深度清理批次 3 | 扩展 `system.servicing_logs` 加入 `ProgramData\USOShared\Logs`；新增 `apps.onedrive_logs`（OneDrive 日志/遥测与 setup 日志）；排除 USOPrivate\UpdateStore、OneDrive keystore/JSON/INI；UWP LocalCache 不做通用规则 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
@@ -76,6 +77,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - P0 提权回退：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`npm run test`、`npm run build` 通过；`npm run build:helper:release` 与 `npm run tauri build` 通过，生成 `target\release\bundle\nsis\CC DiskSage_0.2.0_x64-setup.exe`；待禁用 PowerShell 的 Win10 真机验证回退路径
 - 深度清理批次 1：`cargo test --workspace` 通过（新增 `builtin_fixtures` 测试）；真机 quick scan 实测 Edge 组件/扩展缓存 177.3 MB、Chrome 组件/扩展缓存 77.7 MB、Chrome GPU 缓存 8.2 MB、Edge GPU 缓存 2.1 MB、Windows 维护/更新日志 606.9 MB / 114 文件；管理员日志项待提权实测，Win10 路径待核验
 - 深度清理批次 2：真机 quick scan 实测 Office 缓存 532.7 MB / 4768 文件、扩展后的 Windows 维护/更新日志 607.1 MB / 116 文件；`system.upgrade_leftovers` 在本机无残留；INetCache 因收益过低（约 34.7 KB）未纳入；Package Cache/VS Packages 不自动删除；`cargo test`、clippy 通过
+- 深度清理批次 3：真机 quick scan 实测扩展后的维护/更新日志 662.5 MB / 159 文件、OneDrive 日志 11.7 MB / 75 文件；USOPrivate\UpdateStore、OneDrive keystore/JSON/INI 作为红线排除；`cargo test`、clippy 通过
 
 ## 未完成（下一阶段）
 
