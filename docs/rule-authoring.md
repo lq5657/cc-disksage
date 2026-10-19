@@ -81,12 +81,30 @@ action = { type = "trash" }
 - `rules/tests/<rule_id>/positive/`：应当命中的文件
 - `rules/tests/<rule_id>/redline/`：绝不能命中的文件（聊天数据库、Cookie、密码、文档等）
 
-当前测试骨架位于 `crates/disksage-rules/tests/quick_scan.rs`；新增规则时需要补充：
+当前测试骨架：
+
+- `crates/disksage-rules/tests/quick_scan.rs`：schema、glob、红线等通用行为。
+- `crates/disksage-rules/tests/builtin_fixtures.rs`：按规则 ID 跑
+  `rules/tests/<rule_id>/{positive,redline}`。新规则必须把 ID 加入该文件的
+  `NEW_RULES` 列表，并提交两类 fixture。
+
+fixture 目录约定：`positive/` 与 `redline/` 下直接用环境变量名作为顶层目录，例如：
+
+```text
+rules/tests/browser.edge_gpu_cache/positive/LOCALAPPDATA/Microsoft/Edge/User Data/Default/DawnCache/sample.bin
+rules/tests/browser.edge_gpu_cache/redline/LOCALAPPDATA/Microsoft/Edge/User Data/Default/Cookies
+```
+
+测试会把每个环境变量指向临时目录，把这些子树复制进去，再执行规则匹配；
+所有 fixture 文件的 mtime 会被设为一年前，避免被 `min_age_days` 过滤。
+
+新增规则时需要确认：
 
 1. 解析与 schema 校验通过
-2. 正向 fixture 命中数量/大小符合预期
+2. 正向 fixture 至少命中一个文件
 3. 红线 fixture 零命中
 4. 规则不允许把 root 本身作为删除目标
+5. 真实机器上记录 `verified_at` / `verified_on` 与实测大小
 
 ## 管理员规则
 

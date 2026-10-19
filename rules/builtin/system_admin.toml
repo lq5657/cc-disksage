@@ -140,3 +140,108 @@ targets = [
 ]
 explain = { what_zh = "执行 powercfg /hibernate off，删除 hiberfil.sys 并关闭休眠/快速启动。", what_en = "Runs powercfg /hibernate off, removes hiberfil.sys, and disables hibernation/fast startup.", impact_zh = "休眠和快速启动将不可用；可随时用 powercfg /hibernate on 恢复。", impact_en = "Hibernation and fast startup are disabled; they can be restored with powercfg /hibernate on.", exclude_notes_zh = "不修改分页文件。", exclude_notes_en = "The page file is not modified.", source = "Microsoft powercfg" }
 action = { type = "hibernate_off" }
+
+[[rules]]
+id = "system.servicing_logs"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200"
+category = "system_logs"
+title_zh = "Windows 维护与更新日志"
+title_en = "Windows servicing and update logs"
+risk = "caution"
+requires_admin = true
+default_selected = false
+recoverability = "recycle_bin"
+min_age_days = 3
+detect = { path_exists_any = ["%WINDIR%\\Logs\\CBS", "%WINDIR%\\Logs\\DISM", "%WINDIR%\\Logs\\WindowsUpdate", "%WINDIR%\\Logs\\MoSetup", "%WINDIR%\\Logs\\SIH", "%WINDIR%\\Logs\\waasmedic"] }
+targets = [
+  { root = "%WINDIR%\\Logs\\CBS", include_globs = ["CbsPersist_*.log", "*.cab"], exclude_globs = ["CBS.log"], max_depth = 1 },
+  { root = "%WINDIR%\\Logs\\DISM", include_globs = ["*.log"], exclude_globs = [], max_depth = 1 },
+  { root = "%WINDIR%\\Logs\\WindowsUpdate", include_globs = ["*.etl", "*.log"], exclude_globs = [], max_depth = 1 },
+  { root = "%WINDIR%\\Logs\\MoSetup", include_globs = ["*.log", "*.etl"], exclude_globs = [], max_depth = 1 },
+  { root = "%WINDIR%\\Logs\\SIH", include_globs = ["*.etl", "*.log"], exclude_globs = [], max_depth = 1 },
+  { root = "%WINDIR%\\Logs\\waasmedic", include_globs = ["*.etl", "*.log"], exclude_globs = [], max_depth = 1 }
+]
+explain = { what_zh = "Windows 组件安装、DISM、Windows 更新与维护日志。", what_en = "Windows component installation, DISM, Windows Update, and servicing logs.", impact_zh = "删除后历史诊断信息会丢失；不影响系统更新、启动或已安装更新。正在使用的日志会被跳过。", impact_en = "Historical diagnostic information is lost; system updates, boot, and installed updates are unaffected. Logs in use are skipped.", exclude_notes_zh = "不删除 CBS.log、不触碰 WinSxS、不删除已安装更新。", exclude_notes_en = "CBS.log is not matched, WinSxS is never touched, and installed updates are not removed.", source = "Windows Logs CBS/DISM/WindowsUpdate/MoSetup/SIH/waasmedic layouts" }
+action = { type = "trash" }
+
+[[rules]]
+id = "system.prefetch"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200"
+category = "system_cache"
+title_zh = "Prefetch 预读取文件"
+title_en = "Prefetch files"
+risk = "caution"
+requires_admin = true
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 7
+detect = { path_exists_any = ["%WINDIR%\\Prefetch"] }
+targets = [
+  { root = "%WINDIR%\\Prefetch", include_globs = ["*.pf"], exclude_globs = ["layout.ini"], max_depth = 1 }
+]
+explain = { what_zh = "Windows 用于加速程序启动的预读取文件。", what_en = "Prefetch files used by Windows to speed up application startup.", impact_zh = "删除后程序首次启动可能略慢，Windows 会按需重建。", impact_en = "Applications may start slightly slower the first time; Windows rebuilds the files on demand.", exclude_notes_zh = "只匹配 *.pf，不删除 layout.ini 或其他文件。", exclude_notes_en = "Only *.pf files are matched; layout.ini and other files are not touched.", source = "Windows Prefetch layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "system.panther_logs"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200"
+category = "system_logs"
+title_zh = "Windows 安装日志（Panther）"
+title_en = "Windows setup logs (Panther)"
+risk = "caution"
+requires_admin = true
+default_selected = false
+recoverability = "recycle_bin"
+min_age_days = 7
+detect = { path_exists_any = ["%WINDIR%\\Panther"] }
+targets = [
+  { root = "%WINDIR%\\Panther", include_globs = ["**/*.log", "**/*.etl", "**/*.dmp"], exclude_globs = ["**/*.xml", "**/*.txt", "**/*.ini"], max_depth = 4 }
+]
+explain = { what_zh = "Windows 安装与升级过程生成的日志和转储。", what_en = "Logs and dumps generated during Windows setup and upgrade.", impact_zh = "删除后无法再分析历史安装/升级问题；不影响当前系统启动。", impact_en = "Historical setup/upgrade diagnostics can no longer be analyzed; the current system boot is unaffected.", exclude_notes_zh = "只匹配日志、ETL 与转储，不删除 XML/TXT/INI 配置文件。", exclude_notes_en = "Only logs, ETL, and dumps are matched; XML/TXT/INI configuration files are not touched.", source = "Windows Panther setup log layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "system.live_kernel_reports"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200"
+category = "system_logs"
+title_zh = "内核实时报告转储"
+title_en = "Live kernel report dumps"
+risk = "caution"
+requires_admin = true
+default_selected = false
+recoverability = "recycle_bin"
+min_age_days = 7
+detect = { path_exists_any = ["%WINDIR%\\LiveKernelReports"] }
+targets = [
+  { root = "%WINDIR%\\LiveKernelReports", include_globs = ["**/*.dmp", "**/*.etl"], exclude_globs = [], max_depth = 4 }
+]
+explain = { what_zh = "LiveKernelReports 中的内核/驱动诊断转储。", what_en = "Kernel and driver diagnostic dumps under LiveKernelReports.", impact_zh = "删除后无法再分析这些历史硬件/驱动问题；不影响系统稳定性。", impact_en = "Historical hardware/driver diagnostics can no longer be analyzed; system stability is not affected.", exclude_notes_zh = "只匹配 .dmp/.etl，不删除其他文件。", exclude_notes_en = "Only .dmp/.etl files are matched; other files are not touched.", source = "Windows LiveKernelReports layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "system.windows_system_temp"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200"
+category = "system_temp"
+title_zh = "Windows 系统临时目录"
+title_en = "Windows system temp directory"
+risk = "caution"
+requires_admin = true
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 1
+detect = { path_exists_any = ["%WINDIR%\\SystemTemp"] }
+targets = [
+  { root = "%WINDIR%\\SystemTemp", include_globs = ["**/*"], exclude_globs = ["**/*.lock"], max_depth = 8 }
+]
+explain = { what_zh = "Windows 系统组件使用的临时文件目录。", what_en = "Temporary files used by Windows system components.", impact_zh = "正在使用的文件会被跳过；部分组件可能需要重新生成临时数据。", impact_en = "Files in use are skipped; some components may regenerate temporary data.", exclude_notes_zh = "不删除目录本身，不触碰 System32/WinSxS。", exclude_notes_en = "The directory itself is preserved; System32 and WinSxS are never touched.", source = "Windows SystemTemp layout" }
+action = { type = "trash" }

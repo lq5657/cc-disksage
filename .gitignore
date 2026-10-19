@@ -38,3 +38,7 @@ dist-installers/
 *.sqlite3
 Thumbs.db
 Desktop.ini
+
+# Rule fixtures intentionally use ignored extensions such as *.log and
+# directories named Logs/ (e.g. Windows CBS log fixtures).
+!rules/tests/**

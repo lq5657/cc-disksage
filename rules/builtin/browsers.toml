@@ -59,3 +59,83 @@ targets = [
 ]
 explain = { what_zh = "Firefox 的网页缓存目录 cache2。", what_en = "Firefox web cache directory cache2.", impact_zh = "删除后网页首次加载可能略慢；Cookie、历史、书签和密码不受影响。", impact_en = "The first page load may be slightly slower; cookies, history, bookmarks, and passwords are untouched.", exclude_notes_zh = "硬排除 cookies.sqlite、places.sqlite、logins.json、key4.db、cert9.db。", exclude_notes_en = "cookies.sqlite, places.sqlite, logins.json, key4.db, and cert9.db are hard-excluded.", source = "Mozilla Firefox cache2 layout" }
 action = { type = "trash" }
+
+[[rules]]
+id = "browser.edge_component_cache"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / Edge 155.0.4283.62"
+category = "browser"
+title_zh = "Edge 组件与扩展下载缓存"
+title_en = "Edge component and extension download cache"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Microsoft\\Edge\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data", include_globs = ["component_crx_cache/**", "extensions_crx_cache/**"], exclude_globs = ["**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Service Worker/**", "**/Network/**", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Edge 下载的组件与扩展 CRX 缓存，已安装的扩展和组件不受影响。", what_en = "Downloaded component and extension CRX caches for Edge; installed extensions and components are unaffected.", impact_zh = "删除后浏览器会在需要时重新下载；首次启动或组件更新可能略慢。", impact_en = "Edge re-downloads them on demand; the first launch or component update may be slightly slower.", exclude_notes_zh = "硬排除 Cookie、登录数据、历史、书签、Local Storage、Service Worker 与 Network。", exclude_notes_en = "Cookies, login data, history, bookmarks, Local Storage, Service Worker, and Network are hard-excluded.", source = "Chromium Edge User Data component_crx_cache / extensions_crx_cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "browser.edge_gpu_cache"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / Edge 155.0.4283.62"
+category = "browser"
+title_zh = "Edge GPU 与着色器缓存"
+title_en = "Edge GPU and shader cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Microsoft\\Edge\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data", include_globs = ["*/ShaderCache/**", "*/GrShaderCache/**", "*/DawnCache/**", "*/DawnGraphiteCache/**", "*/DawnWebGPUCache/**"], exclude_globs = ["**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Service Worker/**", "**/Network/**", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Edge 的 GPU、Dawn 与着色器编译缓存。", what_en = "GPU, Dawn, and shader compilation caches for Edge.", impact_zh = "删除后网页或 WebGPU 应用首次渲染可能略慢；登录状态与书签不受影响。", impact_en = "The first render of web pages or WebGPU apps may be slightly slower; sign-in state and bookmarks are unaffected.", exclude_notes_zh = "硬排除 Cookie、登录数据、历史、书签、Local Storage 与 Service Worker。", exclude_notes_en = "Cookies, login data, history, bookmarks, Local Storage, and Service Worker are hard-excluded.", source = "Chromium Edge User Data shader/GPU cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "browser.chrome_component_cache"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / Chrome 155.0.8059.80"
+category = "browser"
+title_zh = "Chrome 组件与扩展下载缓存"
+title_en = "Chrome component and extension download cache"
+risk = "caution"
+requires_admin = false
+default_selected = false
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Google\\Chrome\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Google\\Chrome\\User Data", include_globs = ["component_crx_cache/**", "extensions_crx_cache/**"], exclude_globs = ["**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Service Worker/**", "**/Network/**", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Chrome 下载的组件与扩展 CRX 缓存，已安装的扩展和组件不受影响。", what_en = "Downloaded component and extension CRX caches for Chrome; installed extensions and components are unaffected.", impact_zh = "删除后浏览器会在需要时重新下载；首次启动或组件更新可能略慢。", impact_en = "Chrome re-downloads them on demand; the first launch or component update may be slightly slower.", exclude_notes_zh = "硬排除 Cookie、登录数据、历史、书签、Local Storage、Service Worker 与 Network。", exclude_notes_en = "Cookies, login data, history, bookmarks, Local Storage, Service Worker, and Network are hard-excluded.", source = "Chromium Chrome User Data component_crx_cache / extensions_crx_cache layout" }
+action = { type = "trash" }
+
+[[rules]]
+id = "browser.chrome_gpu_cache"
+version = 1
+verified_at = "2026-10-19"
+verified_on = "Windows 11 26200 / Chrome 155.0.8059.80"
+category = "browser"
+title_zh = "Chrome GPU 与着色器缓存"
+title_en = "Chrome GPU and shader cache"
+risk = "safe"
+requires_admin = false
+default_selected = true
+recoverability = "regenerable"
+min_age_days = 0
+detect = { path_exists_any = ["%LOCALAPPDATA%\\Google\\Chrome\\User Data"] }
+targets = [
+  { root = "%LOCALAPPDATA%\\Google\\Chrome\\User Data", include_globs = ["*/ShaderCache/**", "*/GrShaderCache/**", "*/DawnCache/**", "*/DawnGraphiteCache/**", "*/DawnWebGPUCache/**"], exclude_globs = ["**/Cookies*", "**/Login Data*", "**/History*", "**/Bookmarks*", "**/Web Data*", "**/Local Storage/**", "**/Session Storage/**", "**/IndexedDB/**", "**/Service Worker/**", "**/Network/**", "**/Preferences", "**/Local State"], max_depth = 8 }
+]
+explain = { what_zh = "Chrome 的 GPU、Dawn 与着色器编译缓存。", what_en = "GPU, Dawn, and shader compilation caches for Chrome.", impact_zh = "删除后网页或 WebGPU 应用首次渲染可能略慢；登录状态与书签不受影响。", impact_en = "The first render of web pages or WebGPU apps may be slightly slower; sign-in state and bookmarks are unaffected.", exclude_notes_zh = "硬排除 Cookie、登录数据、历史、书签、Local Storage 与 Service Worker。", exclude_notes_en = "Cookies, login data, history, bookmarks, Local Storage, and Service Worker are hard-excluded.", source = "Chromium Chrome User Data shader/GPU cache layout" }
+action = { type = "trash" }

@@ -418,7 +418,47 @@ Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct |
   5. `logs/helper-launch.jsonl` 中出现 `mechanism=native`；
   6. 正常 Win11 环境仍出现 `mechanism=powershell`。
 
-## 五、参考
+## 五、深度清理批次 1（2026-10-19）
+
+已落地 9 条规则：
+
+| 规则 | 风险 | 管理员 | 默认勾选 | 真机实测（Windows 11 26200） |
+|---|---|---|---|---|
+| `browser.edge_component_cache` | caution | 否 | 否 | 177.3 MB / 24 文件 |
+| `browser.chrome_component_cache` | caution | 否 | 否 | 77.7 MB / 24 文件 |
+| `browser.edge_gpu_cache` | safe | 否 | 是 | 2.1 MB / 23 文件 |
+| `browser.chrome_gpu_cache` | safe | 否 | 是 | 8.2 MB / 33 文件 |
+| `system.servicing_logs` | caution | 是 | 否 | 606.9 MB / 114 文件（非提权估算） |
+| `system.prefetch` | caution | 是 | 否 | 0 B（本机 Prefetch 为空） |
+| `system.panther_logs` | caution | 是 | 否 | 1 个日志文件 |
+| `system.live_kernel_reports` | caution | 是 | 否 | 0 B |
+| `system.windows_system_temp` | caution | 是 | 否 | 0 B |
+
+配套：
+
+- `crates/disksage-rules/tests/builtin_fixtures.rs`：按规则 ID 跑
+  `rules/tests/<rule_id>/{positive,redline}`，fixture 的 mtime 自动设为一年前，
+  覆盖 `min_age_days`；红线 fixture 必须零命中。
+- `rules/tests/<rule_id>/...`：9 条规则各自的 positive + redline fixture。
+- `docs/rule-authoring.md`：补充 fixture 目录约定和新规则检查清单。
+
+边界：
+
+- `system.servicing_logs` 只匹配 `CbsPersist_*.log`、`*.cab`、DISM/WindowsUpdate/MoSetup/SIH/waasmedic
+  的日志/ETL；**不匹配 CBS.log**，不触碰 WinSxS，不删除已安装更新。
+- `system.prefetch` 只匹配 `*.pf`，不删除 `layout.ini`。
+- `system.panther_logs` 只匹配日志/ETL/转储，不删除 XML/TXT/INI。
+- 浏览器规则硬排除 Cookie、登录数据、历史、书签、Local Storage、Session Storage、
+  IndexedDB、Service Worker、Network、Preferences、Local State。
+- 组件/扩展 CRX 缓存默认不勾选（caution）；GPU/着色器缓存为 safe、默认勾选。
+
+待办：
+
+- 在提权 helper 下实测 `system.servicing_logs` 等管理员项的大小与回收站删除。
+- 在 Windows 10 22H2 上核验路径与大小，并更新各规则的 `verified_on`。
+- 继续批次 2：Office/Teams、游戏平台、开发缓存、升级残留、只读深度发现。
+
+## 六、参考
 
 - 现有实现状态：`.claude/plans/implementation-status.md`
 - 规则引擎与安全边界：`.claude/plans/disk-cleaner-implementation.md` 第 8 节

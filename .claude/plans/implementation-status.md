@@ -34,6 +34,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 | 代码签名 | `sign-binary.ps1`、`sign-installers.ps1`、`tauri.signed.conf.json`、`sign-command.ps1`、PFX/指纹/时间戳、Tauri signCommand 签名 helper/主程序/安装包 |
 | 安装包 | offline WebView2、lite、helper 侧车、静默安装/启动/卸载验证 |
 | 提权兼容（P0） | PowerShell 优先 + 原生 `ShellExecuteExW("runas")` 自动回退；helper 服务控制回退 SCM API、回收站回退 `SHEmptyRecycleBinW`；取消 UAC 不重试；实现完成，待禁用 PowerShell 的 Win10 实测 |
+| 深度清理批次 1 | 新增 9 条规则：Edge/Chrome 组件与扩展 CRX 缓存、Edge/Chrome GPU 与着色器缓存、Windows 维护/更新日志、Prefetch、Panther、LiveKernelReports、Windows SystemTemp；新增 `rules/tests` fixture 与 `builtin_fixtures.rs` 测试骨架 |
 | 文档 | README、rule-authoring、privacy、architecture、验证清单 |
 
 ## 验证基线
@@ -72,6 +73,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 - NSIS 安装/启动/卸载：真机通过；安装目录包含 `disksage-helper.exe`；卸载后 `CC DiskSage Auto Clean` 计划任务被移除
 - 最终未签名包复核：安装后的 `cc-disksage.exe` / `disksage-helper.exe` Authenticode 状态为 NotSigned；自签名测试证书与临时 PFX 已清理
 - P0 提权回退：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`npm run test`、`npm run build` 通过；`npm run build:helper:release` 与 `npm run tauri build` 通过，生成 `target\release\bundle\nsis\CC DiskSage_0.2.0_x64-setup.exe`；待禁用 PowerShell 的 Win10 真机验证回退路径
+- 深度清理批次 1：`cargo test --workspace` 通过（新增 `builtin_fixtures` 测试）；真机 quick scan 实测 Edge 组件/扩展缓存 177.3 MB、Chrome 组件/扩展缓存 77.7 MB、Chrome GPU 缓存 8.2 MB、Edge GPU 缓存 2.1 MB、Windows 维护/更新日志 606.9 MB / 114 文件；管理员日志项待提权实测，Win10 路径待核验
 
 ## 未完成（下一阶段）
 
@@ -80,7 +82,7 @@ v0.2.0 已发布：https://github.com/lq5657/cc-disksage/releases/tag/v0.2.0
 3. 托盘菜单「显示主界面」「退出」的手工点击验证（关闭隐藏与通知已实测）。
 4. 自动更新、per-machine 安装变体、便携版。
 5. 正式发布代码签名（用户暂缓；流水线已完成，需要受信任证书）。
-6. 更多第三方应用规则（需真实环境核验 + positive/redline fixture）。
+6. 继续扩展深度清理规则（Office/Teams、游戏平台、开发缓存、升级残留等）；现有未覆盖规则也需逐步补 positive/redline fixture；所有规则需真实环境核验。
 7. 扫描快照只持久化前 3 层摘要；如果后续需要深层下钻，再改存压缩的完整树。
 8. 在禁用 PowerShell 的 Windows 10 环境实测提权回退、服务缓存清理与回收站清空。
 
